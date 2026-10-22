@@ -130,7 +130,8 @@ export async function handlePayOrder(req: Request, res: Response) {
             parseInt(id, 10),
             payment_method,
             parseFloat(tip_amount),
-            parseFloat(discount_amount)
+            parseFloat(discount_amount),
+            req.user?.id
         );
 
         if (!order) {

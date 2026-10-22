@@ -189,7 +189,17 @@ export async function initDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- 16. Журнал боя посуды
+      -- 16. Журнал изменений заказа (хронология карточек: кто и что добавил/изменил/удалил)
+      CREATE TABLE IF NOT EXISTS order_history (
+        id SERIAL PRIMARY KEY,
+        order_id INT REFERENCES orders(id) ON DELETE CASCADE,
+        user_id INT REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,           -- created, taken_over, item_added, item_updated, item_removed, paid
+        details TEXT,                          -- человекочитаемое описание изменения
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      -- 17. Журнал боя посуды
       CREATE TABLE IF NOT EXISTS breakage_logs (
         id SERIAL PRIMARY KEY,
         menu_item_id INT REFERENCES menu_items(id),
@@ -199,7 +209,7 @@ export async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- 17. Корректировки смен (штрафы/вычеты)
+      -- 18. Корректировки смен (штрафы/вычеты)
       CREATE TABLE IF NOT EXISTS shift_adjustments (
         id SERIAL PRIMARY KEY,
         shift_id INT REFERENCES shifts(id) ON DELETE CASCADE,
@@ -209,7 +219,7 @@ export async function initDatabase() {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- 18. Оповещения на дашборде (стоп-листы и т.п.)
+      -- 19. Оповещения на дашборде (стоп-листы и т.п.)
       CREATE TABLE IF NOT EXISTS announcements (
         id SERIAL PRIMARY KEY,
         title VARCHAR(200) NOT NULL,
