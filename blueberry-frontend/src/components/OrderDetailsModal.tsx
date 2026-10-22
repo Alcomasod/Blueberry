@@ -2,9 +2,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
+import { formatAmount } from '../lib/format';
 import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
-import { Plus, Minus, Trash2, CreditCard, Search, Loader2 } from 'lucide-react';
+import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History } from 'lucide-react';
 import Modal from './Modal';
+import { useAuthStore } from '../store/authStore';
 
 interface OrderDetailsModalProps {
     orderId: number;
@@ -18,6 +20,17 @@ interface OrderItem {
     price_at_sale: number;
     line_total: number;
     comment: string;
+    created_at: string;
+    waiter_id: number | null;
+    waiter_name: string | null;
+}
+
+interface HistoryEntry {
+    id: number;
+    action: string;
+    details: string;
+    created_at: string;
+    user_name: string | null;
 }
 
 interface Order {
@@ -26,7 +39,10 @@ interface Order {
     zone_name: string;
     total_amount: string;
     status: string;
+    waiter_id: number | null;
+    waiter_name: string | null;
     items: OrderItem[];
+    history: HistoryEntry[];
 }
 
 const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
@@ -36,6 +52,8 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     const [showAddItem, setShowAddItem] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeCategoryKey, setActiveCategoryKey] = useState<string>('all');
+    const [showHistory, setShowHistory] = useState(false);
+    const currentUserId = useAuthStore((state) => state.user?.id);
 
     const fetchData = async () => {
         setLoading(true);
@@ -103,7 +121,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     };
 
     const handlePayOrder = async () => {
-        if (!confirm(`Оплатить заказ на сумму ${order?.total_amount} руб.?`)) return;
+        if (!confirm(`Оплатить заказ на сумму ${formatAmount(order?.total_amount)} руб.?`)) return;
         try {
             await api.post(`/orders/${orderId}/pay`, {
                 payment_method: 'card',
@@ -165,19 +183,33 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                         </div>
                         <div className="text-right">
                             <p className="text-xs text-gray-500">Итого</p>
-                            <p className="text-xl font-bold text-blueberry-900">{order.total_amount} ₽</p>
+                            <p className="text-xl font-bold text-blueberry-900">{formatAmount(order.total_amount)} ₽</p>
                         </div>
                     </div>
 
+                    {/* Карточки позиций в хронологическом порядке: кто и когда добавил */}
                     <div className="max-h-60 overflow-y-auto space-y-2 border-t border-b py-2">
                         {order.items.length === 0 ? (
                             <p className="text-center text-gray-400 py-4">Заказ пуст. Добавьте позиции.</p>
                         ) : (
-                            order.items.map((item) => (
+                            [...order.items]
+                                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                                .map((item) => (
                                 <div key={item.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
                                     <div className="flex-1">
                                         <p className="font-medium text-gray-800 text-sm">{item.item_name}</p>
-                                        <p className="text-xs text-gray-500">{item.line_total} ₽</p>
+                                        <p className="text-xs text-gray-500">
+                                            {formatAmount(item.line_total)} ₽
+                                            {item.waiter_name && (
+                                                <span className={item.waiter_id === currentUserId ? 'text-green-700 ml-1' : 'text-orange-600 ml-1'}>
+                                                    • {item.waiter_name}
+                                                </span>
+                                            )}
+                                            <span className="text-gray-400 ml-1">
+                                                {new Date(item.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        </p>
+                                        {item.comment && <p className="text-xs italic text-gray-500">«{item.comment}»</p>}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <button onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)} className="p-1 bg-gray-200 rounded hover:bg-gray-300">
@@ -198,6 +230,15 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
 
                     <div className="flex gap-2">
                         <button
+                            onClick={() => setShowHistory((v) => !v)}
+                            className={`flex items-center justify-center gap-1 px-3 py-2 rounded-lg transition ${
+                                showHistory ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                            title="История изменений заказа"
+                        >
+                            <History size={16} />
+                        </button>
+                        <button
                             onClick={() => setShowAddItem(true)}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
                         >
@@ -210,6 +251,27 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                             <CreditCard size={16} /> Оплатить
                         </button>
                     </div>
+
+                    {/* Хронология всех изменений заказа (каждое изменение — отдельная карточка) */}
+                    {showHistory && (
+                        <div className="border-t pt-2 max-h-48 overflow-y-auto space-y-1">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">История изменений</p>
+                            {(order.history ?? []).length === 0 ? (
+                                <p className="text-xs text-gray-400 py-2">Изменений пока нет.</p>
+                            ) : (
+                                (order.history ?? []).map((h) => (
+                                    <div key={h.id} className="flex items-start gap-2 text-xs bg-blueberry-50 rounded-lg p-2">
+                                        <span className="text-gray-400 whitespace-nowrap">
+                                            {new Date(h.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                        <span className="text-gray-700">
+                                            <span className="font-medium">{h.user_name || 'Система'}</span> — {h.details}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
                 </div>
             </Modal>
 

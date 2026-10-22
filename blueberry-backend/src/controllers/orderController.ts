@@ -83,9 +83,8 @@ export async function handleCreateOrder(req: Request, res: Response) {
 
     const { table_id, items } = req.body;
 
-    if (!items || !Array.isArray(items)) {
-        return res.status(400).json({ success: false, error: 'Items must be an array' });
-    }
+    // Пустой заказ разрешён: официант сначала «открывает стол», позиции добавляются позже
+    const orderItems: OrderItemInput[] = Array.isArray(items) ? items : [];
 
     try {
         const role = req.user?.role;
@@ -100,7 +99,7 @@ export async function handleCreateOrder(req: Request, res: Response) {
         const order = await createOrder(
             shiftId,
             table_id || null,
-            items as OrderItemInput[],
+            orderItems,
             waiterId
         );
 
@@ -131,7 +130,8 @@ export async function handlePayOrder(req: Request, res: Response) {
             parseInt(id, 10),
             payment_method,
             parseFloat(tip_amount),
-            parseFloat(discount_amount)
+            parseFloat(discount_amount),
+            req.user?.id
         );
 
         if (!order) {

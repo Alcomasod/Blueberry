@@ -224,7 +224,9 @@ const TablesPage = () => {
             setSelectedTable(null);
             setActiveOrderId(orderId);
         } else {
-            alert('Активный заказ для этого стола не найден');
+            // Открытого заказа нет — создаём новый (бэкенд при наличии открытого
+            // заказа на столе вернёт его, поэтому гонка безопасна).
+            await handleCreateOrder();
         }
     };
 
