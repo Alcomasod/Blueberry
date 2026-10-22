@@ -47,6 +47,21 @@ async function logOrderHistory(
 }
 
 // ==========================================
+// ПОИСК ОТКРЫТОГО ЗАКАЗА СТОЛА (для «подхвата»)
+// ==========================================
+
+export async function findOpenOrderByTable(
+    tableId: number
+): Promise<{ id: number; waiter_id: number | null } | null> {
+    const result = await pool.query(
+        `SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
+         ORDER BY created_at DESC LIMIT 1`,
+        [tableId]
+    );
+    return result.rows.length > 0 ? result.rows[0] : null;
+}
+
+// ==========================================
 // СОЗДАНИЕ И ОПЛАТА ЗАКАЗА
 // ==========================================
 
