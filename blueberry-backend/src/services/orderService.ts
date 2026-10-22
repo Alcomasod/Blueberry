@@ -395,13 +395,35 @@ export async function getOrdersByRole(
     // Кухня и кальянная видят все заказы без разделения по сотрудникам.
     const isWaiterLike = role === 'waiter' || role === 'hookah_master' || role === 'hookah_bar';
 
+    // Основной запрос + агрегаты отдельно: так параметры фильтра/сортировки
+    // нумеруются однозначно и без ошибок.
     let query = `
+        WITH totals AS (
+            -- Итоги считаются из позиций на лету: это лечит рассинхронизацию
+            -- orders.total_amount с фактическим содержимым заказа.
+            SELECT oi.order_id,
+                   SUM(
+                       CASE
+                           WHEN oi.menu_item_id IS NOT NULL THEN oi.quantity * oi.price_at_sale
+                           WHEN oi.combo_id IS NOT NULL THEN oi.combo_price
+                           ELSE 0
+                       END
+                   ) as line_sum,
+                   COUNT(oi.id) as items_count
+            FROM order_items oi
+            GROUP BY oi.order_id
+        ),
+        last_actions AS (
+            SELECT order_id, MAX(created_at) as last_action_at
+            FROM order_history
+            GROUP BY order_id
+        )
         SELECT
             o.id,
             o.shift_id,
             o.table_id,
             o.status,
-            o.total_amount,
+            GREATEST(o.total_amount, COALESCE(tot.line_sum, 0))::text as total_amount,
             o.discount_amount,
             o.tip_amount,
             o.payment_method,
@@ -409,22 +431,18 @@ export async function getOrdersByRole(
             o.closed_at,
             t.number as table_number,
             z.name as zone_name,
-            COUNT(DISTINCT oi.id) as items_count,
+            COALESCE(tot.items_count, 0)::text as items_count,
             COALESCE(o.waiter_id, s.waiter_id) as waiter_id,
             COALESCE(wu.full_name, u.full_name) as waiter_name,
-            MAX(oh.last_action_at) as last_action_at
+            la.last_action_at
         FROM orders o
         LEFT JOIN tables t ON o.table_id = t.id
         LEFT JOIN zones z ON t.zone_id = z.id
-        LEFT JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN shifts s ON o.shift_id = s.id
         LEFT JOIN users u ON s.waiter_id = u.id
         LEFT JOIN users wu ON o.waiter_id = wu.id
-        LEFT JOIN (
-            SELECT order_id, MAX(created_at) as last_action_at
-            FROM order_history
-            GROUP BY order_id
-        ) oh ON oh.order_id = o.id
+        LEFT JOIN totals tot ON tot.order_id = o.id
+        LEFT JOIN last_actions la ON la.order_id = o.id
         WHERE 1=1
     `;
 
@@ -436,14 +454,12 @@ export async function getOrdersByRole(
         params.push(status);
     }
 
-    query += ` GROUP BY o.id, t.number, z.name, o.waiter_id, s.waiter_id, u.full_name, wu.full_name`;
-
     if (isWaiterLike) {
         // Свои — первые; остальные открытые — после них (в пределах выбранного статуса).
         query += `
             ORDER BY
                 (COALESCE(o.waiter_id, s.waiter_id) = $${paramIndex++}) DESC NULLS LAST,
-                MAX(oh.last_action_at) DESC NULLS LAST,
+                la.last_action_at DESC NULLS LAST,
                 o.created_at DESC
         `;
         params.push(waiterId);
@@ -468,6 +484,9 @@ export async function getOrderDetails(orderId: number, userRole: string, userId:
     let query = `
         SELECT
             o.*,
+            -- Фактическая сумма считается из позиций на лету (лечит рассинхрон
+            -- orders.total_amount при добавлении/изменении позиций)
+            GREATEST(o.total_amount, COALESCE(tot.line_sum, 0))::text as total_amount,
             t.number as table_number,
             z.name as zone_name,
             COALESCE(wu.full_name, u.full_name) as waiter_name
@@ -477,6 +496,18 @@ export async function getOrderDetails(orderId: number, userRole: string, userId:
                  LEFT JOIN shifts s ON o.shift_id = s.id
                  LEFT JOIN users u ON s.waiter_id = u.id
                  LEFT JOIN users wu ON o.waiter_id = wu.id
+                 LEFT JOIN (
+                     SELECT oi2.order_id,
+                            SUM(
+                                CASE
+                                    WHEN oi2.menu_item_id IS NOT NULL THEN oi2.quantity * oi2.price_at_sale
+                                    WHEN oi2.combo_id IS NOT NULL THEN oi2.combo_price
+                                    ELSE 0
+                                END
+                            ) as line_sum
+                     FROM order_items oi2
+                     GROUP BY oi2.order_id
+                 ) tot ON tot.order_id = o.id
         WHERE o.id = $1
     `;
     const params: unknown[] = [orderId];

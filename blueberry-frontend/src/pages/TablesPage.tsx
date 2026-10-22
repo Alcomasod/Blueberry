@@ -72,24 +72,25 @@ const TablesPage = () => {
         setLoading(true);
         setError('');
         try {
-            const [tablesRes, zonesRes] = await Promise.all([
+            // Все три запроса параллельно; карта заказов не должна ронять страницу
+            const [tablesRes, zonesRes, ordersRes] = await Promise.all([
                 api.get('/tables'),
                 api.get('/zones'),
+                api.get('/orders', { params: { status: 'open' } }).catch(() => null),
             ]);
             setTables(tablesRes.data.data);
             setZones(zonesRes.data.data);
 
-            // Карта «стол → открытый заказ», чтобы сразу открывать меню заказа
-            try {
-                const ordersRes = await api.get('/orders', { params: { status: 'open' } });
-                const map = new Map<number, number>();
+            // Карта «стол → открытый заказ», чтобы сразу открывать меню заказа.
+            // В карту попадают заказы с table_id — в т.ч. открытые администратором
+            // без смены (у них shift_id = NULL).
+            const map = new Map<number, number>();
+            if (ordersRes) {
                 for (const o of (ordersRes.data.data || []) as OpenOrder[]) {
                     if (o.table_id != null) map.set(o.table_id, o.id);
                 }
-                setOpenOrdersByTable(map);
-            } catch {
-                setOpenOrdersByTable(new Map());
             }
+            setOpenOrdersByTable(map);
         } catch (err) {
             setError(getApiErrorMessage(err, 'Ошибка загрузки данных'));
         } finally {
@@ -203,7 +204,10 @@ const TablesPage = () => {
     const handleOpenOrder = async () => {
         if (!selectedTable) return;
 
-        // Сначала по уже загруженной карте столов, затем — резервный запрос к API
+        // Сначала по уже загруженной карте столов, затем — резервный запрос к API.
+        // Если заказ не найден ни там, ни там — НЕ создаём вслепую: POST /orders
+        // сам разберётся (найдёт открытый заказ стола и вернёт его «подхватом»,
+        // либо создаст новый). Это лечит случай «Активный заказ не найден».
         let orderId = openOrdersByTable.get(selectedTable.id);
 
         if (orderId === undefined) {
@@ -214,9 +218,9 @@ const TablesPage = () => {
                 const orders = response.data.data as OpenOrder[];
                 const tableOrder = orders.find((order) => order.table_id === selectedTable.id);
                 if (tableOrder) orderId = tableOrder.id;
-            } catch (err) {
-                alert(getApiErrorMessage(err, 'Ошибка поиска заказа'));
-                return;
+            } catch {
+                // Резервный поиск не удался — переходим к прямому открытию через POST
+                orderId = undefined;
             }
         }
 
@@ -224,9 +228,22 @@ const TablesPage = () => {
             setSelectedTable(null);
             setActiveOrderId(orderId);
         } else {
-            // Открытого заказа нет — создаём новый (бэкенд при наличии открытого
-            // заказа на столе вернёт его, поэтому гонка безопасна).
-            await handleCreateOrder();
+            await openOrCreateOrderForTable(selectedTable.id);
+        }
+    };
+
+    // Прямое открытие активного заказа стола через POST /orders: бэкенд сам
+    // найдёт открытый заказ (любого сотрудника, включая админа без смены)
+    // и вернёт его id («подхват»). Это надёжнее поиска по списку: не зависит
+    // от состояния кэша-карты и синхронизации статуса стола.
+    const openOrCreateOrderForTable = async (tableId: number) => {
+        try {
+            const res = await api.post('/orders', { table_id: tableId, items: [] });
+            setSelectedTable(null);
+            setActiveOrderId(res.data.data.id);
+            await fetchData();
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Не удалось открыть заказ стола'));
         }
     };
 
@@ -460,23 +477,40 @@ const TablesPage = () => {
                         {/* Кнопки работы с заказом */}
                         {selectedTable.status === 'free' && canManageStatus && (
                             <div className="pt-2">
-                                <button
-                                    onClick={handleCreateOrder}
-                                    className="w-full px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition font-medium"
-                                >
-                                    Создать заказ
-                                </button>
+                                {openOrdersByTable.has(selectedTable.id) ? (
+                                    // Стол формально «свободен», но на нём есть открытый
+                                    // заказ (например, админ открыл счёт без смены или
+                                    // статус стола рассинхронизирован) — показываем «подхват»
+                                    <button
+                                        onClick={handleOpenOrder}
+                                        className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition font-medium"
+                                    >
+                                        Открыть заказ стола
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={handleCreateOrder}
+                                        className="w-full px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition font-medium"
+                                    >
+                                        Создать заказ
+                                    </button>
+                                )}
                             </div>
                         )}
 
                         {selectedTable.status === 'occupied' && canManageStatus && (
-                            <div className="pt-2">
+                            <div className="pt-2 space-y-2">
                                 <button
                                     onClick={handleOpenOrder}
                                     className="w-full px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition font-medium"
                                 >
                                     Открыть заказ
                                 </button>
+                                {!openOrdersByTable.has(selectedTable.id) && (
+                                    <p className="text-xs text-gray-500 text-center">
+                                        Открытый заказ не найден — при нажатии будет создан новый.
+                                    </p>
+                                )}
                             </div>
                         )}
 
