@@ -81,7 +81,8 @@ export async function createMenuItem(
     description?: string,
     imageUrl?: string,
     isForGuests: boolean = true,
-    sortOrder: number = 0
+    sortOrder: number = 0,
+    composition?: string
 ) {
     const client = await pool.connect();
     try {
@@ -90,10 +91,10 @@ export async function createMenuItem(
         // Создаем позицию меню
         const itemResult = await client.query(`
             INSERT INTO menu_items 
-            (category_id, name, description, image_url, is_for_guests, sort_order, is_available)
-            VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+            (category_id, name, description, composition, image_url, is_for_guests, sort_order, is_available)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
             RETURNING *
-        `, [categoryId, name, description || null, imageUrl || null, isForGuests, sortOrder]);
+        `, [categoryId, name, description || null, composition || null, imageUrl || null, isForGuests, sortOrder]);
 
         const menuItem = itemResult.rows[0];
 
@@ -121,7 +122,8 @@ export async function updateMenuItem(
     imageUrl?: string,
     isForGuests?: boolean,
     isAvailable?: boolean,
-    sortOrder?: number
+    sortOrder?: number,
+    composition?: string
 ) {
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -138,6 +140,10 @@ export async function updateMenuItem(
     if (description !== undefined) {
         updates.push(`description = $${paramIndex++}`);
         values.push(description);
+    }
+    if (composition !== undefined) {
+        updates.push(`composition = $${paramIndex++}`);
+        values.push(composition);
     }
     if (imageUrl !== undefined) {
         updates.push(`image_url = $${paramIndex++}`);
@@ -203,8 +209,24 @@ export async function updateMenuItemPrice(menuItemId: number, newPrice: number, 
 }
 
 export async function deleteMenuItem(id: number) {
+    // Защита от удаления: позиция участвует в истории заказов —
+    // вместо физического удаления деактивируем (soft delete),
+    // чтобы не ломать исторические ссылки и финансовую аналитику.
+    const usedRes = await pool.query(
+        `SELECT 1 FROM order_items WHERE menu_item_id = $1 LIMIT 1`,
+        [id]
+    );
+
+    if (usedRes.rows.length > 0) {
+        const result = await pool.query(
+            `UPDATE menu_items SET is_available = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id`,
+            [id]
+        );
+        return result.rows.length > 0 ? 'deactivated' : null;
+    }
+
     const result = await pool.query(`
         DELETE FROM menu_items WHERE id = $1 RETURNING id
     `, [id]);
-    return result.rows.length > 0;
+    return result.rows.length > 0 ? 'deleted' : null;
 }

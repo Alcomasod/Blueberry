@@ -74,7 +74,7 @@ export async function handleDeleteCategory(req: Request, res: Response) {
 
 export async function handleCreateMenuItem(req: Request, res: Response) {
     const userId = req.user?.id;
-    const { category_id, name, price, description, image_url, is_for_guests = true, sort_order = 0 } = req.body;
+    const { category_id, name, price, description, image_url, is_for_guests = true, sort_order = 0, composition } = req.body;
 
     if (!category_id || !name || price === undefined) {
         return res.status(400).json({
@@ -91,7 +91,8 @@ export async function handleCreateMenuItem(req: Request, res: Response) {
             description,
             image_url,
             is_for_guests,
-            sort_order
+            sort_order,
+            composition
         );
         res.status(201).json({ success: true, data: menuItem });
     } catch (error) {
@@ -102,7 +103,7 @@ export async function handleCreateMenuItem(req: Request, res: Response) {
 
 export async function handleUpdateMenuItem(req: Request, res: Response) {
     const { id } = req.params;
-    const { category_id, name, description, image_url, is_for_guests, is_available, sort_order } = req.body;
+    const { category_id, name, description, image_url, is_for_guests, is_available, sort_order, composition } = req.body;
 
     try {
         const menuItem = await updateMenuItem(
@@ -113,7 +114,8 @@ export async function handleUpdateMenuItem(req: Request, res: Response) {
             image_url,
             is_for_guests,
             is_available,
-            sort_order
+            sort_order,
+            composition
         );
 
         if (!menuItem) {
@@ -149,9 +151,15 @@ export async function handleDeleteMenuItem(req: Request, res: Response) {
     const { id } = req.params;
 
     try {
-        const success = await deleteMenuItem(parseInt(id, 10));
-        if (!success) {
+        const result = await deleteMenuItem(parseInt(id, 10));
+        if (!result) {
             return res.status(404).json({ success: false, error: 'Menu item not found' });
+        }
+        if (result === 'deactivated') {
+            return res.json({
+                success: true,
+                message: 'Позиция участвует в истории заказов, поэтому скрыта из меню (soft delete)'
+            });
         }
         res.json({ success: true, message: 'Menu item deleted' });
     } catch (error) {

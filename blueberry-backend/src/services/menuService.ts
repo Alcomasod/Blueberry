@@ -5,6 +5,7 @@ export interface MenuItem {
     name: string;
     price: string; // DECIMAL возвращается как строка в node-postgres
     is_for_guests: boolean;
+    composition?: string | null;
 }
 
 export interface Category {
@@ -28,7 +29,7 @@ export async function getMenuTree(): Promise<Category[]> {
 
     // 2. Получаем все доступные позиции меню с их ТЕКУЩЕЙ ценой
     const itemsRes = await pool.query(`
-    SELECT m.id, m.name, m.category_id, p.price, m.is_for_guests, m.sort_order
+    SELECT m.id, m.name, m.category_id, p.price, m.is_for_guests, m.sort_order, m.composition
     FROM menu_items m
     JOIN menu_item_prices p ON m.id = p.menu_item_id AND p.valid_to IS NULL
     WHERE m.is_available = true
@@ -72,7 +73,8 @@ export async function getMenuTree(): Promise<Category[]> {
                 id: item.id,
                 name: item.name,
                 price: item.price,
-                is_for_guests: item.is_for_guests
+                is_for_guests: item.is_for_guests,
+                composition: item.composition ?? null
             });
         }
     }

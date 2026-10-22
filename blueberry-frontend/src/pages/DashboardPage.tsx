@@ -57,7 +57,7 @@ const DashboardPage = () => {
         setLoading(true);
         setError('');
         try {
-            const res = await api.get('/announcements');
+            const res = await api.get('/announcements/');
             setAnnouncements(res.data.data);
         } catch (err) {
             setError(getApiErrorMessage(err, 'Ошибка загрузки оповещений'));
@@ -75,7 +75,7 @@ const DashboardPage = () => {
         if (!form.title.trim() || !form.message.trim()) return;
         setSaving(true);
         try {
-            await api.post('/announcements', form);
+            await api.post('/announcements/', form);
             setForm({ title: '', message: '', type: 'info' });
             setShowCreateModal(false);
             await fetchAnnouncements();
