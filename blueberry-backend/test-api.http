@@ -1,0 +1,28 @@
+### 1. Открываем смену для официанта с ID=2 (Иван Официант из наших сидов)
+POST http://localhost:3001/api/shifts/open
+X-Waiter-Id: 2
+Content-Type: application/json
+
+### 2. Получаем активную смену (чтобы убедиться, что она открылась)
+GET http://localhost:3001/api/shifts/active
+X-Waiter-Id: 2
+
+### 3. Создаем заказ (2 пасты и чай) на столик №1 (id=1)
+POST http://localhost:3001/api/orders
+X-Waiter-Id: 2
+Content-Type: application/json
+
+{
+  "table_id": 1,
+  "items": [
+    {
+      "menu_item_id": 101,
+      "quantity": 2,
+      "comment": "Без лука"
+    },
+    {
+      "menu_item_id": 102,
+      "quantity": 1
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+#version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: blueberry-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: blueberry
+    ports:
+      - "5433:5432"  # <-- ИЗМЕНЕНО: внешний порт 5433, внутренний 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blueberry"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: blueberry-app
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Имя сервиса, а не localhost
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=blueberry
+      # <-- ДОБАВЛЕНО: JWT-переменные
+      - JWT_SECRET=blueberry-super-secret-key-2026-change-in-production
+      - JWT_EXPIRES_IN=24h
+    depends_on:
+      postgres:
+        condition: service_healthy # <-- Ждем полной готовности БД перед стартом Node.js
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
