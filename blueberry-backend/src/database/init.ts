@@ -59,6 +59,7 @@ export async function initDatabase() {
         category_id INT REFERENCES categories(id) NOT NULL,
         name VARCHAR(255) NOT NULL,
         description TEXT,
+        composition TEXT,
         image_url VARCHAR(500),
         is_available BOOLEAN DEFAULT TRUE,
         is_for_guests BOOLEAN DEFAULT TRUE,
@@ -238,6 +239,10 @@ export async function initDatabase() {
             WHERE sub.order_id = o.id AND o.waiter_id IS NULL
         `);
         console.log('✅ Blueberry: Миграции схемы заказов применены (shift_id nullable, orders.waiter_id).');
+
+        // Состав блюда (подсказка для персонала)
+        await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS composition TEXT`);
+        console.log('✅ Blueberry: Миграция схемы меню применена (menu_items.composition).');
 
         await seedDatabase();
     } catch (error) {

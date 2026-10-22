@@ -7,9 +7,16 @@ interface ModalProps {
     onClose: () => void;
     title: string;
     children: React.ReactNode; // Используем React.ReactNode вместо прямого импорта
+    size?: 'sm' | 'md' | 'lg';
 }
 
-const Modal = ({ isOpen, onClose, title, children }: ModalProps) => {
+const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
+    sm: 'max-w-sm',
+    md: 'max-w-md',
+    lg: 'max-w-2xl',
+};
+
+const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) => {
     if (!isOpen) return null;
 
     return (
@@ -18,7 +25,7 @@ const Modal = ({ isOpen, onClose, title, children }: ModalProps) => {
             onClick={onClose}
         >
             <div
-                className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200"
+                className={`bg-white rounded-xl p-6 ${sizeClasses[size]} w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200`}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center mb-4">

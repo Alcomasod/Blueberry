@@ -135,8 +135,12 @@ app.use('/api/customers', authenticateToken, customerRoutes);
 app.use('/api/incidents', authenticateToken, incidentRoutes);
 
 // Оповещения на дашборде: просмотр — всем авторизованным,
-// создание/отключение — только admin+ (проверяется внутри маршрутов)
+// создание/отключение — только admin+ (проверяется внутри маршрутов).
+// ВНИМАНИЕ: монтируем роутер и по пути с завершающим слэшем, иначе при
+// strict routing Express (версии 4.x) запросы вида '/api/announcements/'
+// (двойной слэш в baseURL + путь) не матчатся и получают 404.
 app.use('/api/announcements', authenticateToken, announcementRoutes);
+app.use('/api/announcements/', authenticateToken, announcementRoutes);
 
 // 404 для неизвестных путей + централизованная обработка ошибок
 app.use(notFoundHandler);

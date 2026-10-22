@@ -1,7 +1,8 @@
 // src/components/OrderDetailsModal.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
+import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
 import { Plus, Minus, Trash2, CreditCard, Search, Loader2 } from 'lucide-react';
 import Modal from './Modal';
 
@@ -28,19 +29,13 @@ interface Order {
     items: OrderItem[];
 }
 
-interface MenuItem {
-    id: number;
-    name: string;
-    is_available: boolean;
-    current_price: number;
-}
-
 const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     const [order, setOrder] = useState<Order | null>(null);
-    const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+    const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddItem, setShowAddItem] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [activeCategoryKey, setActiveCategoryKey] = useState<string>('all');
 
     const fetchData = async () => {
         setLoading(true);
@@ -53,67 +48,14 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
             setOrder(orderRes.data.data);
 
             // GET /api/menu возвращает ДЕРЕВО категорий:
-            // [{ id, name, items: [{ id, name, price, is_for_guests }], children: [...] }, ...]
-            // Разворачиваем его в плоский список позиций для поиска и добавления.
-            const flatMenu: MenuItem[] = [];
-            const seen = new Set<number>();
-
-            interface RawMenuLeaf {
-                id: number;
-                name: string;
-                price?: string | number;
-                current_price?: string | number;
-                is_available?: boolean;
-            }
-            interface RawMenuCategory {
-                items?: RawMenuLeaf[];
-                children?: RawMenuCategory[];
-            }
-
-            const walkCategories = (categories: RawMenuCategory[]) => {
-                for (const cat of categories || []) {
-                    for (const item of cat.items || []) {
-                        const price = parseFloat(String(item.price ?? item.current_price ?? '0'));
-                        if (!seen.has(item.id) && price > 0) {
-                            seen.add(item.id);
-                            flatMenu.push({
-                                id: item.id,
-                                name: item.name,
-                                is_available: true,
-                                current_price: price,
-                            });
-                        }
-                    }
-                    if (Array.isArray(cat.children) && cat.children.length > 0) {
-                        walkCategories(cat.children);
-                    }
-                }
-            };
-
-            const menuData = menuRes.data.data;
-            if (Array.isArray(menuData)) {
-                // Поддержка и дерева категорий, и плоского списка (на будущее)
-                type MenuNode = RawMenuCategory & RawMenuLeaf;
-                if (menuData.some((x: MenuNode) => Array.isArray(x.items) || Array.isArray(x.children))) {
-                    walkCategories(menuData as RawMenuCategory[]);
-                } else {
-                    (menuData as RawMenuLeaf[]).forEach((item) => {
-                        const price = parseFloat(String(item.price ?? item.current_price ?? '0'));
-                        if (!seen.has(item.id) && price > 0) {
-                            seen.add(item.id);
-                            flatMenu.push({
-                                id: item.id,
-                                name: item.name,
-                                is_available: item.is_available !== false,
-                                current_price: price,
-                            });
-                        }
-                    });
-                }
-            }
-
-            console.log(`✅ Загружено позиций меню для добавления: ${flatMenu.length}`);
-            setMenuItems(flatMenu);
+            // [{ id, name, items: [{ id, name, price }], children: [...] }, ...]
+            // Строим из него каталог по категориям (горячее, салаты и т.д.).
+            const builtCatalog = buildCatalog(menuRes.data.data);
+            console.log(
+                `✅ Каталог меню: ${builtCatalog.length} категорий, ` +
+                    `${builtCatalog.reduce((n, c) => n + c.items.length, 0)} позиций`
+            );
+            setCatalog(builtCatalog);
         } catch (err) {
             console.error('❌ Error fetching order details:', err);
         } finally {
@@ -125,7 +67,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
         fetchData();
     }, [orderId]);
 
-    const handleAddItem = async (item: MenuItem) => {
+    const handleAddItem = async (item: FlatMenuItem) => {
         try {
             await api.post(`/orders/${orderId}/items`, {
                 menu_item_id: item.id,
@@ -175,9 +117,24 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
         }
     };
 
-    const filteredMenu = menuItems.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // Каталог по категориям (горячее, салаты и т.д.) + поиск по всему меню.
+    const visibleCategories = useMemo(() => {
+        const term = searchTerm.trim().toLowerCase();
+        if (!term) {
+            return activeCategoryKey === 'all'
+                ? catalog
+                : catalog.filter((c) => c.key === activeCategoryKey);
+        }
+        // При поиске ищем по всем категориям
+        return catalog
+            .map((c) => ({
+                ...c,
+                items: c.items.filter((i) => i.name.toLowerCase().includes(term)),
+            }))
+            .filter((c) => c.items.length > 0);
+    }, [catalog, searchTerm, activeCategoryKey]);
+
+    const totalFound = visibleCategories.reduce((n, c) => n + c.items.length, 0);
 
     if (loading) {
         return (
@@ -269,19 +226,65 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                             autoFocus
                         />
                     </div>
-                    <div className="max-h-60 overflow-y-auto space-y-2">
-                        {filteredMenu.length === 0 ? (
+
+                    {/* Каталог: вкладки категорий (горячее, салаты и т.д.) */}
+                    {!searchTerm && catalog.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                onClick={() => setActiveCategoryKey('all')}
+                                className={`px-3 py-1 rounded-full text-sm font-medium transition ${
+                                    activeCategoryKey === 'all'
+                                        ? 'bg-blueberry-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                            >
+                                Все
+                            </button>
+                            {catalog.map((cat) => (
+                                <button
+                                    key={cat.key}
+                                    onClick={() => setActiveCategoryKey(cat.key)}
+                                    className={`px-3 py-1 rounded-full text-sm font-medium transition ${
+                                        activeCategoryKey === cat.key
+                                            ? 'bg-blueberry-600 text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {cat.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="max-h-72 overflow-y-auto space-y-3">
+                        {totalFound === 0 ? (
                             <p className="text-center text-gray-400 py-4">Ничего не найдено или меню пусто</p>
                         ) : (
-                            filteredMenu.map((item) => (
-                                <button
-                                    key={item.id}
-                                    onClick={() => handleAddItem(item)}
-                                    className="w-full flex justify-between items-center p-2 bg-gray-50 rounded-lg hover:bg-blueberry-50 transition text-left"
-                                >
-                                    <span className="font-medium text-sm text-gray-800">{item.name}</span>
-                                    <span className="text-sm text-blueberry-600 font-semibold">{item.current_price} ₽</span>
-                                </button>
+                            visibleCategories.map((cat) => (
+                                <div key={cat.key}>
+                                    <p className="sticky top-0 bg-white text-xs font-semibold uppercase tracking-wide text-gray-500 py-1">
+                                        {cat.name}
+                                    </p>
+                                    <div className="space-y-2">
+                                        {cat.items.map((item) => (
+                                            <button
+                                                key={item.id}
+                                                onClick={() => handleAddItem(item)}
+                                                className="w-full flex justify-between items-start p-2 bg-gray-50 rounded-lg hover:bg-blueberry-50 transition text-left"
+                                            >
+                                                <span className="font-medium text-sm text-gray-800">
+                                                    {item.name}
+                                                    {item.composition && (
+                                                        <span className="block text-xs font-normal text-gray-500 mt-0.5 line-clamp-2">
+                                                            {item.composition}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <span className="text-sm text-blueberry-600 font-semibold ml-2 whitespace-nowrap">{item.price} ₽</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             ))
                         )}
                     </div>
