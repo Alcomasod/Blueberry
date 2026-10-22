@@ -1,4 +1,7 @@
 import express, { Request, Response } from 'express';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -39,7 +42,10 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
 // ==========================================
 // MIDDLEWARE (Промежуточное ПО)
 // ==========================================
-app.use(helmet());
+// crossOriginResourcePolicy отключён намеренно: в едином контейнере
+// бэкенд раздаёт статику фронтенда, и строгий заголовок может мешать
+// загрузке ассетов при доступе по разным hostname/IP из зала.
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
 
 // CORS: список разрешённых источников задаётся через ALLOWED_ORIGINS
@@ -145,6 +151,31 @@ app.use('/api/announcements/', authenticateToken, announcementRoutes);
 // 404 для неизвестных путей + централизованная обработка ошибок
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+// ==========================================
+// СТАТИКА ФРОНТЕНДА (единый контейнер)
+// ==========================================
+// Если рядом с dist бэкенда лежит собранный фронтенд (public/frontend —
+// копируется в Dockerfile), Express раздаёт его сам. Запросы идут на тот же
+// порт, поэтому CORS не участвует, а VITE_API_URL = '/api' даёт относительные
+// пути — приложение доступно по любому IP/домену из зала без пересборки.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendDist = path.join(__dirname, 'public', 'frontend');
+
+if (fs.existsSync(path.join(frontendDist, 'index.html'))) {
+    app.use(express.static(frontendDist));
+
+    // SPA-fallback: все GET-запросы, не начинающиеся с /api, отдаём index.html,
+    // чтобы React Router корректно обрабатывал прямые ссылки (/tables, /orders/5).
+    app.get('*', (req: Request, res: Response) => {
+        if (req.path.startsWith('/api')) {
+            return res.status(404).json({ success: false, error: 'Not found' });
+        }
+        res.sendFile(path.join(frontendDist, 'index.html'));
+    });
+
+    console.log('🫐 Frontend static files served from', frontendDist);
+}
 
 const startServer = async () => {
     try {
