@@ -59,12 +59,18 @@ const Sidebar = () => {
                 <p className="truncate text-sm font-medium text-blueberry-100">{user?.full_name}</p>
                 <p className="text-xs capitalize text-blueberry-300">{user?.role.replace('_', ' ')}</p>
             </div>
-            {/* Кнопка управления сменой (только для официантов и кальянщиков) */}
-            {(user?.role === 'waiter' || user?.role === 'hookah_master' || user?.role === 'hookah_bar') && (
-                <div className="border-b border-blueberry-600 p-4">
-                    <ShiftButton />
-                </div>
-            )}
+            {/* Кнопка управления сменой.
+                Операционному персоналу (официанты, кальянщики) — обязательно для работы;
+                администраторам и выше (admin, director, sys_admin) — опционально,
+                они могут создавать заказы и без открытой смены. */}
+            {user &&
+                ['waiter', 'hookah_master', 'hookah_bar', 'admin', 'director', 'sys_admin'].includes(
+                    user.role
+                ) && (
+                    <div className="border-b border-blueberry-600 p-4">
+                        <ShiftButton />
+                    </div>
+                )}
 
             {/* Навигация */}
             <nav className="flex-1 overflow-y-auto p-4">
