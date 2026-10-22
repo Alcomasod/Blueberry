@@ -39,6 +39,7 @@ interface Order {
     zone_name: string;
     total_amount: string;
     status: string;
+    comment: string | null;
     waiter_id: number | null;
     waiter_name: string | null;
     items: OrderItem[];
@@ -53,6 +54,10 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeCategoryKey, setActiveCategoryKey] = useState<string>('all');
     const [showHistory, setShowHistory] = useState(false);
+    // Комментарий к заказу (персона гостей, предпочтения: «убрать лук», «без сахара»)
+    const [orderComment, setOrderComment] = useState('');
+    const [commentDirty, setCommentDirty] = useState(false);
+    const [saving, setSaving] = useState(false);
     const currentUserId = useAuthStore((state) => state.user?.id);
 
     const fetchData = async () => {
@@ -64,6 +69,8 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
             ]);
 
             setOrder(orderRes.data.data);
+            // Синхронизируем поле комментария, если пользователь ещё не редактировал его
+            setOrderComment((prev) => (commentDirty ? prev : orderRes.data.data.comment ?? ''));
 
             // GET /api/menu возвращает ДЕРЕВО категорий:
             // [{ id, name, items: [{ id, name, price }], children: [...] }, ...]

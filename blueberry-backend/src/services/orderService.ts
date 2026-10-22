@@ -26,7 +26,10 @@ export interface OrderResult {
     table_id: number | null;
     status: string;
     total_amount: string;
+    comment?: string | null;
     items: CreatedOrderItem[];
+    is_takeover?: boolean;
+    takeover_note?: string;
 }
 
 // ==========================================
@@ -51,52 +54,151 @@ async function logOrderHistory(
 // ==========================================
 
 export async function findOpenOrderByTable(
-    tableId: number
+    tableId: number,
+    executor: { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> } = pool
 ): Promise<{ id: number; waiter_id: number | null } | null> {
-    const result = await pool.query(
+    const result = await executor.query(
         `SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
          ORDER BY created_at DESC LIMIT 1`,
         [tableId]
     );
-    return result.rows.length > 0 ? result.rows[0] : null;
+    return result.rows.length > 0 ? (result.rows[0] as { id: number; waiter_id: number | null }) : null;
+}
+
+// Открытый заказ стола с блокировкой строки (FOR UPDATE).
+// Используется ВНУТРИ транзакции createOrder для защиты от гонки
+// «два официанта одновременно создают заказ на один стол».
+async function lockOpenOrderByTable(
+    client: { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+    tableId: number
+): Promise<{ id: number; waiter_id: number | null } | null> {
+    const result = await client.query(
+        `SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
+         ORDER BY created_at DESC LIMIT 1
+         FOR UPDATE`,
+        [tableId]
+    );
+    return result.rows.length > 0 ? (result.rows[0] as { id: number; waiter_id: number | null }) : null;
 }
 
 // ==========================================
 // СОЗДАНИЕ И ОПЛАТА ЗАКАЗА
 // ==========================================
 
+// Добавление позиций внутри открытой транзакции (используется createOrder).
+// Возвращает созданные позиции и новую сумму заказа.
+async function addItemsToOrderTx(
+    client: { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+    orderId: number,
+    waiterId: number,
+    items: OrderItemInput[],
+    currentTotal = 0
+): Promise<{ items: CreatedOrderItem[]; total: number }> {
+    let total = currentTotal;
+    const createdItems: CreatedOrderItem[] = [];
+
+    for (const item of items) {
+        let price: number = 0;
+        let isCombo = false;
+        let itemName = '';
+
+        if (item.menu_item_id) {
+            const priceRes = await client.query(`
+                SELECT p.price, m.name FROM menu_item_prices p
+                JOIN menu_items m ON m.id = p.menu_item_id
+                WHERE p.menu_item_id = $1 AND p.valid_to IS NULL
+            `, [item.menu_item_id]);
+            if (priceRes.rows.length === 0) throw new Error(`Price not found for menu item ${item.menu_item_id}`);
+            price = parseFloat(priceRes.rows[0].price as string);
+            itemName = priceRes.rows[0].name as string;
+        } else if (item.combo_id) {
+            isCombo = true;
+            const comboRes = await client.query(`
+                SELECT combo_price, name FROM combo_sets WHERE id = $1 AND is_available = true
+            `, [item.combo_id]);
+            if (comboRes.rows.length === 0) throw new Error(`Combo not found or unavailable ${item.combo_id}`);
+            price = parseFloat(comboRes.rows[0].combo_price as string);
+            itemName = comboRes.rows[0].name as string;
+        }
+
+        total += price * item.quantity;
+
+        const itemResult = await client.query(`
+            INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+        `, [
+            orderId,
+            item.menu_item_id || null,
+            item.combo_id || null,
+            item.quantity,
+            isCombo ? null : price,
+            isCombo ? price : null,
+            waiterId,
+            item.comment || null
+        ]);
+        createdItems.push(itemResult.rows[0] as unknown as CreatedOrderItem);
+        await logOrderHistory(
+            client, orderId, waiterId, 'item_added',
+            `Добавлено: ${itemName} x${item.quantity}`
+        );
+    }
+
+    return { items: createdItems, total };
+}
+
+export async function updateOrderComment(orderId: number, waiterId: number, comment: string | null, isAdmin = false) {
+    // Разрешение на редактирование (свой/чужой открытый заказ, admin+ — любой)
+    await validateOrderForEditing(orderId, waiterId, isAdmin);
+
+    const trimmed = (typeof comment === 'string' && comment.trim()) ? comment.trim() : null;
+    const result = await pool.query(
+        `UPDATE orders SET comment = $1 WHERE id = $2 RETURNING id, comment`,
+        [trimmed, orderId]
+    );
+
+    await logOrderHistory(
+        pool, orderId, waiterId, 'comment_updated',
+        trimmed ? 'Комментарий к заказу обновлён' : 'Комментарий к заказу удалён'
+    );
+
+    return result.rows[0];
+}
+
 export async function createOrder(
     shiftId: number | null,
     tableId: number | null,
     items: OrderItemInput[],
-    waiterId: number
+    waiterId: number,
+    orderComment?: string | null
 ): Promise<OrderResult> {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
         if (tableId) {
-            const tableCheck = await client.query(`
-                SELECT id, status, is_active FROM tables WHERE id = $1
-            `, [tableId]);
+            // Блокируем строку стола: два сотрудника одновременно не смогут
+            // создать два открытых заказа на один стол (защита от гонки).
+            const tableCheck = await client.query(
+                `SELECT id, status, is_active FROM tables WHERE id = $1 FOR UPDATE`,
+                [tableId]
+            );
 
             if (tableCheck.rows.length === 0) throw new Error('Table not found');
-            const table = tableCheck.rows[0];
+            const table = tableCheck.rows[0] as { id: number; status: string; is_active: boolean };
             if (!table.is_active) throw new Error('Table is not active');
 
             // Независимо от статуса стола сначала ищем ОТКРЫТЫЙ заказ по столу.
             // Это закрывает рассинхронизацию (стол свободен, но заказ админа ещё открыт,
             // или наоборот) и реализует «подхват» чужого стола.
-            const existingRes = await client.query(`
-                SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
-                ORDER BY created_at DESC LIMIT 1
-            `, [tableId]);
+            const existing = await lockOpenOrderByTable(client, tableId);
 
-            if (existingRes.rows.length > 0) {
-                const existing = existingRes.rows[0];
+            if (existing) {
+                let takeoverNote: string | undefined;
                 if (existing.waiter_id !== waiterId) {
                     await client.query(`UPDATE orders SET waiter_id = $1 WHERE id = $2`, [waiterId, existing.id]);
                     await logOrderHistory(client, existing.id, waiterId, 'taken_over', 'Стол подхвачен другим сотрудником');
+                    takeoverNote = 'Вы продолжили открытый заказ другого сотрудника';
                 }
                 // Гарантируем консистентность: если заказ открыт — стол должен быть занят
                 if (table.status !== 'occupied') {
@@ -104,77 +206,47 @@ export async function createOrder(
                 }
                 const orderResult = await client.query(`SELECT * FROM orders WHERE id = $1`, [existing.id]);
                 const itemsRes = await client.query(`SELECT * FROM order_items WHERE order_id = $1 ORDER BY id`, [existing.id]);
+
+                // Если вместе с подхватом пришли новые позиции — добавляем их в существующий заказ
+                let mergedItems = itemsRes.rows as CreatedOrderItem[];
+                let totalAmount = parseFloat((orderResult.rows[0] as { total_amount: string }).total_amount);
+                if (items.length > 0) {
+                    const addRes = await addItemsToOrderTx(client, existing.id, waiterId, items);
+                    mergedItems = [...mergedItems, ...addRes.items];
+                    totalAmount = addRes.total;
+                    await client.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [totalAmount, existing.id]);
+                }
+
                 await client.query('COMMIT');
-                return { ...orderResult.rows[0], items: itemsRes.rows };
+                return {
+                    ...(orderResult.rows[0] as Omit<OrderResult, 'items' | 'is_takeover' | 'takeover_note'>),
+                    total_amount: totalAmount.toFixed(2),
+                    items: mergedItems,
+                    is_takeover: true,
+                    takeover_note: takeoverNote,
+                };
             }
 
             await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1`, [tableId]);
         }
 
+        const comment = (typeof orderComment === 'string' && orderComment.trim()) ? orderComment.trim() : null;
+
         const orderResult = await client.query(`
-            INSERT INTO orders (shift_id, waiter_id, table_id, status, total_amount, created_at)
-            VALUES ($1, $2, $3, 'open', 0, NOW())
+            INSERT INTO orders (shift_id, waiter_id, table_id, status, total_amount, comment, created_at)
+            VALUES ($1, $2, $3, 'open', 0, $4, NOW())
             RETURNING *
-        `, [shiftId, waiterId, tableId]);
+        `, [shiftId, waiterId, tableId, comment]);
 
         const order = orderResult.rows[0];
         await logOrderHistory(client, order.id, waiterId, 'created', 'Заказ создан');
 
-        let totalAmount = 0;
-        const createdItems = [];
+        const addRes = await addItemsToOrderTx(client, order.id, waiterId, items);
 
-        for (const item of items) {
-            let price: number = 0;
-            let isCombo = false;
-            let itemName = '';
-
-            if (item.menu_item_id) {
-                const priceRes = await client.query(`
-                    SELECT p.price, m.name FROM menu_item_prices p
-                    JOIN menu_items m ON m.id = p.menu_item_id
-                    WHERE p.menu_item_id = $1 AND p.valid_to IS NULL
-                `, [item.menu_item_id]);
-                if (priceRes.rows.length === 0) throw new Error(`Price not found for menu item ${item.menu_item_id}`);
-                price = parseFloat(priceRes.rows[0].price);
-                itemName = priceRes.rows[0].name;
-            } else if (item.combo_id) {
-                isCombo = true;
-                const comboRes = await client.query(`
-                    SELECT combo_price, name FROM combo_sets WHERE id = $1 AND is_available = true
-                `, [item.combo_id]);
-                if (comboRes.rows.length === 0) throw new Error(`Combo not found or unavailable ${item.combo_id}`);
-                price = parseFloat(comboRes.rows[0].combo_price);
-                itemName = comboRes.rows[0].name;
-            }
-
-            const itemTotal = price * item.quantity;
-            totalAmount += itemTotal;
-
-            const itemResult = await client.query(`
-                INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING *
-            `, [
-                order.id,
-                item.menu_item_id || null,
-                item.combo_id || null,
-                item.quantity,
-                isCombo ? null : price,
-                isCombo ? price : null,
-                waiterId,
-                item.comment || null
-            ]);
-            createdItems.push(itemResult.rows[0]);
-            await logOrderHistory(
-                client, order.id, waiterId, 'item_added',
-                `Добавлено: ${itemName} x${item.quantity}`
-            );
-        }
-
-        await client.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [totalAmount, order.id]);
+        await client.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [addRes.total, order.id]);
         await client.query('COMMIT');
 
-        return { ...order, total_amount: totalAmount.toFixed(2), items: createdItems };
+        return { ...order, total_amount: addRes.total.toFixed(2), items: addRes.items };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
@@ -442,6 +514,7 @@ export async function getOrdersByRole(
             o.discount_amount,
             o.tip_amount,
             o.payment_method,
+            o.comment,
             o.created_at,
             o.closed_at,
             t.number as table_number,

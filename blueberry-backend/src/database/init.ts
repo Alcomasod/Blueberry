@@ -125,6 +125,7 @@ export async function initDatabase() {
         discount_amount DECIMAL(10,2) DEFAULT 0,
         tip_amount DECIMAL(10,2) DEFAULT 0,
         payment_method VARCHAR(50) CHECK (payment_method IN ('cash', 'card', 'mixed')),
+        comment TEXT,                                -- комментарий к заказу: персона, предпочтения гостей («убрать лук», «без сахара»)
         created_at TIMESTAMP DEFAULT NOW(),
         closed_at TIMESTAMP
       );
@@ -257,7 +258,9 @@ export async function initDatabase() {
 
         // Состав блюда (подсказка для персонала)
         await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS composition TEXT`);
-        console.log('✅ Blueberry: Миграция схемы меню применена (menu_items.composition).');
+        // Комментарий к заказу: персона гостей, вкусовые предпочтения («убрать лук из салата»)
+        await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT`);
+        console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment).');
 
         await seedDatabase();
     } catch (error) {
