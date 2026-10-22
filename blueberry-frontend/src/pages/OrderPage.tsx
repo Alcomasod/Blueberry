@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
+import { formatAmount } from '../lib/format';
 import { useAuthStore } from '../store/authStore';
 import OrderDetailsModal from '../components/OrderDetailsModal';
 import {
@@ -182,7 +183,7 @@ const OrdersPage = () => {
                             <span className="ml-1 text-orange-600 font-medium">(подхватить)</span>
                         )}
                     </span>
-                    <span className="text-lg font-bold text-blueberry-900">{order.total_amount} ₽</span>
+                    <span className="text-lg font-bold text-blueberry-900">{formatAmount(order.total_amount)} ₽</span>
                 </div>
 
                 {/* Кнопки действий для открытых заказов */}

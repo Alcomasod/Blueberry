@@ -68,26 +68,29 @@ export async function createOrder(
             if (tableCheck.rows.length === 0) throw new Error('Table not found');
             const table = tableCheck.rows[0];
             if (!table.is_active) throw new Error('Table is not active');
-            if (table.status === 'occupied') {
-                // Стол уже занят — разрешаем «подхватить» его:
-                // ищем открытый заказ на этом столе и переключаем обслуживание на текущего сотрудника.
-                const existingRes = await client.query(`
-                    SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
-                    ORDER BY created_at DESC LIMIT 1
-                `, [tableId]);
 
-                if (existingRes.rows.length > 0) {
-                    const existing = existingRes.rows[0];
-                    if (existing.waiter_id !== waiterId) {
-                        await client.query(`UPDATE orders SET waiter_id = $1 WHERE id = $2`, [waiterId, existing.id]);
-                        await logOrderHistory(client, existing.id, waiterId, 'taken_over', 'Стол подхвачен другим сотрудником');
-                    }
-                    const orderResult = await client.query(`SELECT * FROM orders WHERE id = $1`, [existing.id]);
-                    const itemsRes = await client.query(`SELECT * FROM order_items WHERE order_id = $1 ORDER BY id`, [existing.id]);
-                    await client.query('COMMIT');
-                    return { ...orderResult.rows[0], items: itemsRes.rows };
+            // Независимо от статуса стола сначала ищем ОТКРЫТЫЙ заказ по столу.
+            // Это закрывает рассинхронизацию (стол свободен, но заказ админа ещё открыт,
+            // или наоборот) и реализует «подхват» чужого стола.
+            const existingRes = await client.query(`
+                SELECT id, waiter_id FROM orders WHERE table_id = $1 AND status = 'open'
+                ORDER BY created_at DESC LIMIT 1
+            `, [tableId]);
+
+            if (existingRes.rows.length > 0) {
+                const existing = existingRes.rows[0];
+                if (existing.waiter_id !== waiterId) {
+                    await client.query(`UPDATE orders SET waiter_id = $1 WHERE id = $2`, [waiterId, existing.id]);
+                    await logOrderHistory(client, existing.id, waiterId, 'taken_over', 'Стол подхвачен другим сотрудником');
                 }
-                // Стол помечен занятым, но открытого заказа нет — просто продолжаем создание нового.
+                // Гарантируем консистентность: если заказ открыт — стол должен быть занят
+                if (table.status !== 'occupied') {
+                    await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1`, [tableId]);
+                }
+                const orderResult = await client.query(`SELECT * FROM orders WHERE id = $1`, [existing.id]);
+                const itemsRes = await client.query(`SELECT * FROM order_items WHERE order_id = $1 ORDER BY id`, [existing.id]);
+                await client.query('COMMIT');
+                return { ...orderResult.rows[0], items: itemsRes.rows };
             }
 
             await client.query(`UPDATE tables SET status = 'occupied' WHERE id = $1`, [tableId]);
@@ -236,8 +239,11 @@ async function validateOrderForEditing(orderId: number, waiterId: number, isAdmi
     return order;
 }
 
-async function recalculateOrderTotal(orderId: number): Promise<number> {
-    const result = await pool.query(`
+async function recalculateOrderTotal(
+    orderId: number,
+    executor: { query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> } = pool
+): Promise<number> {
+    const result = await executor.query(`
         SELECT COALESCE(SUM(line_total), 0) as new_total
         FROM (
             SELECT CASE
@@ -249,8 +255,8 @@ async function recalculateOrderTotal(orderId: number): Promise<number> {
         ) as subquery
     `, [orderId]);
 
-    const newTotal = parseFloat(result.rows[0].new_total);
-    await pool.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [newTotal, orderId]);
+    const newTotal = parseFloat(String(result.rows[0].new_total));
+    await executor.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [newTotal, orderId]);
     return newTotal;
 }
 
@@ -292,7 +298,7 @@ export async function addItemToOrder(orderId: number, waiterId: number, item: Or
         `, [orderId, item.menu_item_id || null, item.combo_id || null, item.quantity, isCombo ? null : price, isCombo ? price : null, waiterId, item.comment || null]);
 
         await logOrderHistory(client, orderId, waiterId, 'item_added', `Добавлено: ${itemName} x${item.quantity}`);
-        const newTotal = await recalculateOrderTotal(orderId);
+        const newTotal = await recalculateOrderTotal(orderId, client);
         await client.query('COMMIT');
         return { item: itemResult.rows[0], new_total: newTotal.toFixed(2) };
     } catch (error) {
@@ -328,7 +334,7 @@ export async function removeItemFromOrder(orderId: number, waiterId: number, ite
             `Удалено: ${nameRes.rows[0]?.name ?? 'позиция'} x${removed.quantity}`
         );
 
-        const newTotal = await recalculateOrderTotal(orderId);
+        const newTotal = await recalculateOrderTotal(orderId, client);
         await client.query('COMMIT');
         return { deleted_item: removed, new_total: newTotal.toFixed(2) };
     } catch (error) {
@@ -364,7 +370,7 @@ export async function updateItemQuantity(orderId: number, waiterId: number, item
             `Изменено количество: ${nameRes.rows[0]?.name ?? 'позиция'} → x${newQuantity}`
         );
 
-        const newTotal = await recalculateOrderTotal(orderId);
+        const newTotal = await recalculateOrderTotal(orderId, client);
         await client.query('COMMIT');
         return { updated_item: updateResult.rows[0], new_total: newTotal.toFixed(2) };
     } catch (error) {

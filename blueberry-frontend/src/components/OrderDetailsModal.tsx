@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
+import { formatAmount } from '../lib/format';
 import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
 import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History } from 'lucide-react';
 import Modal from './Modal';
@@ -120,7 +121,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     };
 
     const handlePayOrder = async () => {
-        if (!confirm(`Оплатить заказ на сумму ${order?.total_amount} руб.?`)) return;
+        if (!confirm(`Оплатить заказ на сумму ${formatAmount(order?.total_amount)} руб.?`)) return;
         try {
             await api.post(`/orders/${orderId}/pay`, {
                 payment_method: 'card',
@@ -182,7 +183,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                         </div>
                         <div className="text-right">
                             <p className="text-xs text-gray-500">Итого</p>
-                            <p className="text-xl font-bold text-blueberry-900">{order.total_amount} ₽</p>
+                            <p className="text-xl font-bold text-blueberry-900">{formatAmount(order.total_amount)} ₽</p>
                         </div>
                     </div>
 
@@ -198,7 +199,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                                     <div className="flex-1">
                                         <p className="font-medium text-gray-800 text-sm">{item.item_name}</p>
                                         <p className="text-xs text-gray-500">
-                                            {item.line_total} ₽
+                                            {formatAmount(item.line_total)} ₽
                                             {item.waiter_name && (
                                                 <span className={item.waiter_id === currentUserId ? 'text-green-700 ml-1' : 'text-orange-600 ml-1'}>
                                                     • {item.waiter_name}
