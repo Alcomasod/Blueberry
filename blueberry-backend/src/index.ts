@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import pool from './config/db.js';
 import { initDatabase } from './database/init.js';
 import menuRoutes from './routes/menuRoutes.js';
@@ -12,6 +14,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { requirePermission } from './middleware/authorize.js';
+import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { PERMISSIONS } from './config/permissions.js';
 import zoneRoutes from './routes/zoneRoutes.js';
 import tableRoutes from './routes/tableRoutes.js';
@@ -19,17 +22,51 @@ import hookahFlavorRoutes from './routes/hookahFlavorRoutes.js';
 import hookahOrderRoutes from './routes/hookahOrderRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import incidentRoutes from './routes/incidentRoutes.js';
+import announcementRoutes from './routes/announcementRoutes.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// В production запуск без заданного JWT_SECRET недопустим:
+// секрет по умолчанию означал бы, что любой может подделать токены.
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+    console.error('❌ JWT_SECRET must be set in production');
+    process.exit(1);
+}
+
 // ==========================================
 // MIDDLEWARE (Промежуточное ПО)
 // ==========================================
+app.use(helmet());
 app.use(express.json());
-app.use(cors()); // <-- ВСТАВЬ ЭТУ СТРОКУ СЮДА (сразу после express.json)
+
+// CORS: список разрешённых источников задаётся через ALLOWED_ORIGINS
+// (через запятую). Если переменная не задана — локальные адреса для разработки.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Разрешаем запросы без Origin (curl, мобильные приложения, server-to-server)
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
+}));
+
+// Защита от брутфорса: не более 10 попыток входа с одного IP за 15 минут
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many login attempts, please try again later' },
+});
 
 // Системные роуты
 app.get('/', (req: Request, res: Response) => {
@@ -55,8 +92,8 @@ app.get('/health', async (req: Request, res: Response) => {
     }
 });
 
-// Публичные роуты
-app.use('/api/auth', authRoutes);
+// Публичные роуты (с защитой от брутфорса)
+app.use('/api/auth', authLimiter, authRoutes);
 
 // ==========================================
 // ЗАЩИЩЕННЫЕ РОУТЫ
@@ -82,11 +119,11 @@ app.use('/api/users', authenticateToken, requirePermission(PERMISSIONS.MANAGE_US
 
 // Столы и зоны
 app.use('/api/zones', authenticateToken, zoneRoutes);
-// Просмотр столов — для всех авторизованных
+// Столы: таблица маршрутов (tableRoutes) сама защищает каждую операцию
+// соответствующим пермишеном (MANAGE_TABLE_STATUS / MANAGE_TABLES).
+// Повторное подключение того же роутера без requirePermission создавало
+// лазейку: первый совпавший маршрут выигрывал, и права не проверялись.
 app.use('/api/tables', authenticateToken, tableRoutes);
-
-// Управление столами (создание, редактирование, удаление) — только admin+
-app.use('/api/tables', authenticateToken, requirePermission(PERMISSIONS.MANAGE_TABLES), tableRoutes);
 // Кальяны
 app.use('/api/hookah/flavors', authenticateToken, hookahFlavorRoutes);
 app.use('/api/hookah/orders', authenticateToken, hookahOrderRoutes);
@@ -96,6 +133,14 @@ app.use('/api/customers', authenticateToken, customerRoutes);
 
 // Бой посуды
 app.use('/api/incidents', authenticateToken, incidentRoutes);
+
+// Оповещения на дашборде: просмотр — всем авторизованным,
+// создание/отключение — только admin+ (проверяется внутри маршрутов)
+app.use('/api/announcements', authenticateToken, announcementRoutes);
+
+// 404 для неизвестных путей + централизованная обработка ошибок
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 const startServer = async () => {
     try {

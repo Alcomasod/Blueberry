@@ -1,13 +1,15 @@
 #version: '3.8'
 
+# Все секреты вынесены в файл .env (не коммитить в git!).
+# Пример для локального запуска — см. .env.example
 services:
   postgres:
     image: postgres:16-alpine
     container_name: blueberry-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: blueberry
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      POSTGRES_DB: ${DB_NAME:-blueberry}
     ports:
       - "5433:5432"  # <-- ИЗМЕНЕНО: внешний порт 5433, внутренний 5432
     volumes:
@@ -29,12 +31,14 @@ services:
       # <-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Имя сервиса, а не localhost
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_NAME=blueberry
-      # <-- ДОБАВЛЕНО: JWT-переменные
-      - JWT_SECRET=blueberry-super-secret-key-2026-change-in-production
-      - JWT_EXPIRES_IN=24h
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      - DB_NAME=${DB_NAME:-blueberry}
+      # JWT-секрет берётся из .env и обязан быть задан
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      # Разрешённые CORS-источники (через запятую)
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
     depends_on:
       postgres:
         condition: service_healthy # <-- Ждем полной готовности БД перед стартом Node.js

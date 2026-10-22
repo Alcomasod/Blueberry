@@ -32,7 +32,7 @@ export async function getBreakageLogs(waiterId?: number, startDate?: string, end
         LEFT JOIN users u ON bl.waiter_id = u.id
         WHERE 1=1
     `;
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (waiterId) {

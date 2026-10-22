@@ -7,14 +7,9 @@ import TablesPage from './pages/TablesPage';
 import OrdersPage from './pages/OrderPage';
 // import ordersPage from './pages/OrderPage';
 import OrderDetailsPage from "./pages/OrderDetailsPage.tsx";
+import DashboardPage from "./pages/DashboardPage.tsx";
 
 // Заглушки для страниц (мы будем наполнять их по мере выбора)
-const DashboardPage = () => (
-    <div>
-        <h1 className="text-3xl font-bold text-gray-800">Дашборд</h1>
-        <p className="mt-2 text-gray-600">Добро пожаловать в систему!</p>
-    </div>
-);
 // const TablesPage = () => <h1 className="text-3xl font-bold text-gray-800">Зал и столы</h1>;
 // const OrdersPage = () => <h1 className="text-3xl font-bold text-gray-800">Заказы</h1>;
 const KitchenPage = () => <h1 className="text-3xl font-bold text-gray-800">Кухня / Бар</h1>;

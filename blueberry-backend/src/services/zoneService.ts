@@ -20,7 +20,7 @@ export async function createZone(name: string, sortOrder: number = 0) {
 
 export async function updateZone(id: number, name?: string, isActive?: boolean, sortOrder?: number) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (name !== undefined) {

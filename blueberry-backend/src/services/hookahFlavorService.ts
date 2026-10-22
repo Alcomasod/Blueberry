@@ -30,7 +30,7 @@ export async function createFlavor(name: string, description?: string, category?
 
 export async function updateFlavor(id: number, name?: string, description?: string, category?: string, isAvailable?: boolean, sortOrder?: number) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (name !== undefined) {

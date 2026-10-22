@@ -1,7 +1,13 @@
 // src/components/ShiftButton.tsx
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { getApiErrorMessage } from '../lib/apiError';
 import { Play, Square, Loader2 } from 'lucide-react';
+
+interface Shift {
+    id: number;
+    status: 'open' | 'closed';
+}
 
 const ShiftButton = () => {
     // Переменная user удалена, так как она не использовалась в этом компоненте
@@ -11,8 +17,8 @@ const ShiftButton = () => {
     const checkShift = async () => {
         try {
             const res = await api.get('/shifts/my');
-            const shifts = res.data.data;
-            const activeShift = shifts.find((s: any) => s.status === 'open');
+            const shifts = res.data.data as Shift[];
+            const activeShift = shifts.find((s) => s.status === 'open');
 
             if (activeShift) {
                 setShiftStatus('open');
@@ -39,8 +45,8 @@ const ShiftButton = () => {
         try {
             await api.post('/shifts/open');
             await checkShift(); // Синхронизируем состояние с бэкендом
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка открытия смены');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка открытия смены'));
         }
     };
 
@@ -51,8 +57,8 @@ const ShiftButton = () => {
         try {
             await api.post(`/shifts/${shiftId}/close`);
             await checkShift(); // Синхронизируем состояние с бэкендом
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка закрытия смены');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка закрытия смены'));
         }
     };
 

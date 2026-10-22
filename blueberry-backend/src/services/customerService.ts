@@ -42,7 +42,7 @@ export async function createCustomer(name: string, phone?: string) {
 // Обновить данные постоянника
 export async function updateCustomer(id: number, name?: string, phone?: string, points?: number) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (name !== undefined) {

@@ -75,7 +75,7 @@ export async function getAllShifts(startDate?: string, endDate?: string) {
         WHERE 1=1
     `;
 
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (startDate) {
