@@ -5,6 +5,7 @@ import {
     handleAddItem,
     handleRemoveItem,
     handleUpdateQuantity,
+    handleUpdateOrderComment,
     handleGetOrders,       // <-- ИСПОЛЬЗУЕМ НОВОЕ ИМЯ
     handleGetOrderDetails
 } from '../controllers/orderController.js';
@@ -31,6 +32,9 @@ router.post('/:id/items', handleAddItem);
 
 // DELETE /api/orders/:id/items/:itemId - Удалить позицию
 router.delete('/:id/items/:itemId', handleRemoveItem);
+
+// PATCH /api/orders/:id/comment - Обновить комментарий к заказу (персона, предпочтения гостей)
+router.patch('/:id/comment', handleUpdateOrderComment);
 
 // PATCH /api/orders/:id/items/:itemId - Изменить количество
 router.patch('/:id/items/:itemId', handleUpdateQuantity);

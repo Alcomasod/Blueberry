@@ -6,6 +6,7 @@ import {
     addItemToOrder,
     removeItemFromOrder,
     updateItemQuantity,
+    updateOrderComment,
     getOrdersByRole,       // <-- ЗАМЕНИЛИ getMyOrders НА getOrdersByRole
     getOrderDetails,
     findOpenOrderByTable
@@ -82,7 +83,7 @@ export async function handleCreateOrder(req: Request, res: Response) {
         return res.status(401).json({ success: false, error: 'User not authenticated' });
     }
 
-    const { table_id, items } = req.body;
+    const { table_id, items, comment } = req.body;
 
     // Пустой заказ разрешён: официант сначала «открывает стол», позиции добавляются позже
     const orderItems: OrderItemInput[] = Array.isArray(items) ? items : [];
@@ -107,7 +108,8 @@ export async function handleCreateOrder(req: Request, res: Response) {
             shiftId,
             table_id || null,
             orderItems,
-            waiterId
+            waiterId,
+            typeof comment === 'string' ? comment : null
         );
 
         res.status(201).json({ success: true, data: order });
@@ -207,6 +209,31 @@ export async function handleRemoveItem(req: Request, res: Response) {
         res.json({ success: true, data: result });
     } catch (error) {
         console.error('Error removing item:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
+
+// Обновление комментария к заказу (персона гостей, предпочтения: «убрать лук», «без сахара»)
+export async function handleUpdateOrderComment(req: Request, res: Response) {
+    const waiterId = req.user?.id;
+    if (!waiterId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+    }
+
+    const { id } = req.params;
+    const { comment } = req.body;
+
+    try {
+        const isAdmin = canManageAnyOrder(req.user?.role);
+        const result = await updateOrderComment(
+            parseInt(id, 10),
+            waiterId,
+            typeof comment === 'string' ? comment : null,
+            isAdmin
+        );
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('Error updating order comment:', error);
         res.status(400).json({ success: false, error: (error as Error).message });
     }
 }
