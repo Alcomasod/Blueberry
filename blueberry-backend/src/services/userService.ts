@@ -62,7 +62,7 @@ export async function createUser(input: CreateUserInput): Promise<User> {
 // Обновить пользователя
 export async function updateUser(id: number, input: UpdateUserInput): Promise<User | null> {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (input.role !== undefined) {

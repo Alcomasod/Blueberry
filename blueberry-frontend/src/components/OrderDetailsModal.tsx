@@ -1,6 +1,7 @@
 // src/components/OrderDetailsModal.tsx
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { getApiErrorMessage } from '../lib/apiError';
 import { Plus, Minus, Trash2, CreditCard, Search, Loader2 } from 'lucide-react';
 import Modal from './Modal';
 
@@ -51,21 +52,64 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
 
             setOrder(orderRes.data.data);
 
-            // ПАРСИНГ МЕНЮ (адаптирован под плоскую таблицу menu_items с полями id, name, price, is_active)
+            // GET /api/menu возвращает ДЕРЕВО категорий:
+            // [{ id, name, items: [{ id, name, price, is_for_guests }], children: [...] }, ...]
+            // Разворачиваем его в плоский список позиций для поиска и добавления.
             const flatMenu: MenuItem[] = [];
-            const menuData = menuRes.data.data;
+            const seen = new Set<number>();
 
-            if (Array.isArray(menuData)) {
-                menuData.forEach((item: any) => {
-                    if (item.is_active && (item.price > 0 || item.current_price > 0)) {
-                        flatMenu.push({
-                            id: item.id,
-                            name: item.name,
-                            is_available: item.is_active,
-                            current_price: item.price || item.current_price || 0,
-                        });
+            interface RawMenuLeaf {
+                id: number;
+                name: string;
+                price?: string | number;
+                current_price?: string | number;
+                is_available?: boolean;
+            }
+            interface RawMenuCategory {
+                items?: RawMenuLeaf[];
+                children?: RawMenuCategory[];
+            }
+
+            const walkCategories = (categories: RawMenuCategory[]) => {
+                for (const cat of categories || []) {
+                    for (const item of cat.items || []) {
+                        const price = parseFloat(String(item.price ?? item.current_price ?? '0'));
+                        if (!seen.has(item.id) && price > 0) {
+                            seen.add(item.id);
+                            flatMenu.push({
+                                id: item.id,
+                                name: item.name,
+                                is_available: true,
+                                current_price: price,
+                            });
+                        }
                     }
-                });
+                    if (Array.isArray(cat.children) && cat.children.length > 0) {
+                        walkCategories(cat.children);
+                    }
+                }
+            };
+
+            const menuData = menuRes.data.data;
+            if (Array.isArray(menuData)) {
+                // Поддержка и дерева категорий, и плоского списка (на будущее)
+                type MenuNode = RawMenuCategory & RawMenuLeaf;
+                if (menuData.some((x: MenuNode) => Array.isArray(x.items) || Array.isArray(x.children))) {
+                    walkCategories(menuData as RawMenuCategory[]);
+                } else {
+                    (menuData as RawMenuLeaf[]).forEach((item) => {
+                        const price = parseFloat(String(item.price ?? item.current_price ?? '0'));
+                        if (!seen.has(item.id) && price > 0) {
+                            seen.add(item.id);
+                            flatMenu.push({
+                                id: item.id,
+                                name: item.name,
+                                is_available: item.is_available !== false,
+                                current_price: price,
+                            });
+                        }
+                    });
+                }
             }
 
             console.log(`✅ Загружено позиций меню для добавления: ${flatMenu.length}`);
@@ -90,9 +134,9 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
             setShowAddItem(false);
             setSearchTerm('');
             await fetchData();
-        } catch (err: any) {
-            console.error('Ошибка добавления:', err.response?.data);
-            alert(err.response?.data?.error || 'Ошибка добавления позиции');
+        } catch (err) {
+            console.error('Ошибка добавления:', err);
+            alert(getApiErrorMessage(err, 'Ошибка добавления позиции'));
         }
     };
 
@@ -101,8 +145,8 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
         try {
             await api.patch(`/orders/${orderId}/items/${itemId}`, { quantity: newQty });
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка обновления количества');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка обновления количества'));
         }
     };
 
@@ -111,8 +155,8 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
         try {
             await api.delete(`/orders/${orderId}/items/${itemId}`);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка удаления позиции');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка удаления позиции'));
         }
     };
 
@@ -126,8 +170,8 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
             });
             alert('Заказ успешно оплачен!');
             onClose();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка оплаты');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка оплаты'));
         }
     };
 

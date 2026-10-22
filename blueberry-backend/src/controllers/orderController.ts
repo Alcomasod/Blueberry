@@ -10,6 +10,13 @@ import {
     getOrderDetails
 } from '../services/orderService.js';
 import { getActiveShift } from '../services/shiftService.js';
+import { hasPermission, PERMISSIONS, Role } from '../config/permissions.js';
+
+// Пользователь с MANAGE_ALL_OPEN_ORDERS (admin+) может работать с заказами
+// независимо от собственной открытой смены.
+function canManageAnyOrder(role?: string): boolean {
+    return !!role && hasPermission(role as Role, PERMISSIONS.MANAGE_ALL_OPEN_ORDERS);
+}
 
 // ==========================================
 // ПОЛУЧЕНИЕ СПИСКА ЗАКАЗОВ
@@ -55,14 +62,8 @@ export async function handleGetOrderDetails(req: Request, res: Response) {
     const { id } = req.params;
 
     try {
-        // Для официанта/кухни проверяем активную смену, для админа передаем null
-        let shiftId = null;
-        if (role === 'waiter' || role === 'kitchen') {
-            const activeShift = await getActiveShift(waiterId);
-            shiftId = activeShift ? activeShift.id : null;
-        }
-
-        const order = await getOrderDetails(parseInt(id, 10), role, shiftId);
+        // getOrderDetails сам ограничит выборку: waiter/kitchen — только свои заказы, admin+ — любые
+        const order = await getOrderDetails(parseInt(id, 10), role, waiterId);
         res.json({ success: true, data: order });
     } catch (error) {
         console.error('Error fetching order details:', error);
@@ -87,13 +88,17 @@ export async function handleCreateOrder(req: Request, res: Response) {
     }
 
     try {
+        const role = req.user?.role;
+        let shiftId: number | null = null;
         const activeShift = await getActiveShift(waiterId);
-        if (!activeShift) {
+        if (activeShift) {
+            shiftId = activeShift.id;
+        } else if (!canManageAnyOrder(role)) {
             return res.status(400).json({ success: false, error: 'No active shift. Please open a shift first.' });
         }
 
         const order = await createOrder(
-            activeShift.id,
+            shiftId,
             table_id || null,
             items as OrderItemInput[],
             waiterId
@@ -160,16 +165,13 @@ export async function handleAddItem(req: Request, res: Response) {
     }
 
     try {
-        const activeShift = await getActiveShift(waiterId);
-        if (!activeShift) {
-            return res.status(400).json({ success: false, error: 'No active shift' });
-        }
+        const isAdmin = canManageAnyOrder(req.user?.role);
 
         const result = await addItemToOrder(
             parseInt(id, 10),
-            activeShift.id,
+            waiterId,
             item as OrderItemInput,
-            waiterId
+            isAdmin
         );
         res.json({ success: true, data: result });
     } catch (error) {
@@ -187,15 +189,13 @@ export async function handleRemoveItem(req: Request, res: Response) {
     const { id, itemId } = req.params;
 
     try {
-        const activeShift = await getActiveShift(waiterId);
-        if (!activeShift) {
-            return res.status(400).json({ success: false, error: 'No active shift' });
-        }
+        const isAdmin = canManageAnyOrder(req.user?.role);
 
         const result = await removeItemFromOrder(
             parseInt(id, 10),
-            activeShift.id,
-            parseInt(itemId, 10)
+            waiterId,
+            parseInt(itemId, 10),
+            isAdmin
         );
         res.json({ success: true, data: result });
     } catch (error) {
@@ -221,16 +221,14 @@ export async function handleUpdateQuantity(req: Request, res: Response) {
     }
 
     try {
-        const activeShift = await getActiveShift(waiterId);
-        if (!activeShift) {
-            return res.status(400).json({ success: false, error: 'No active shift' });
-        }
+        const isAdmin = canManageAnyOrder(req.user?.role);
 
         const result = await updateItemQuantity(
             parseInt(id, 10),
-            activeShift.id,
+            waiterId,
             parseInt(itemId, 10),
-            quantity
+            quantity,
+            isAdmin
         );
         res.json({ success: true, data: result });
     } catch (error) {

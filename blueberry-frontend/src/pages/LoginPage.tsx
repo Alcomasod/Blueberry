@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/api';
+import { getApiErrorMessage } from '../lib/apiError';
 
 const LoginPage = () => {
     const [login, setLogin] = useState('');
@@ -26,8 +27,8 @@ const LoginPage = () => {
 
             // Перенаправляем на дашборд
             navigate('/dashboard');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Ошибка входа');
+        } catch (err) {
+            setError(getApiErrorMessage(err, 'Ошибка входа'));
         } finally {
             setIsLoading(false);
         }

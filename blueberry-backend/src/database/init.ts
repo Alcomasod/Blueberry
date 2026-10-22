@@ -116,7 +116,8 @@ export async function initDatabase() {
       -- 10. Заказы
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
-        shift_id INT REFERENCES shifts(id) NOT NULL,
+        shift_id INT REFERENCES shifts(id),          -- nullable: заказ можно создать без открытой смены (admin+)
+        waiter_id INT REFERENCES users(id),          -- создатель/обслуживающий официант заказа
         table_id INT REFERENCES tables(id),
         status VARCHAR(50) DEFAULT 'open' CHECK (status IN ('open', 'paid', 'cancelled')),
         total_amount DECIMAL(10,2) DEFAULT 0,
@@ -206,9 +207,37 @@ export async function initDatabase() {
         created_by INT REFERENCES users(id),
         created_at TIMESTAMP DEFAULT NOW()
       );
-      
+
+      -- 18. Оповещения на дашборде (стоп-листы и т.п.)
+      CREATE TABLE IF NOT EXISTS announcements (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'info' CHECK (type IN ('info', 'warning', 'stoplist')),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_by INT REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
     `);
         console.log('✅ Blueberry: Таблицы успешно созданы или уже существуют.');
+
+        // --- Лёгкие миграции для существующих БД (CREATE TABLE IF NOT EXISTS не меняет старые схемы) ---
+        await pool.query(`ALTER TABLE orders ALTER COLUMN shift_id DROP NOT NULL`);
+        await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_id INT REFERENCES users(id)`);
+        // Backfill: определяем создавшего официанта по первой позиции заказа
+        await pool.query(`
+            UPDATE orders o
+            SET waiter_id = sub.waiter_id
+            FROM (
+                SELECT DISTINCT ON (order_id) order_id, waiter_id
+                FROM order_items
+                ORDER BY order_id, id ASC
+            ) sub
+            WHERE sub.order_id = o.id AND o.waiter_id IS NULL
+        `);
+        console.log('✅ Blueberry: Миграции схемы заказов применены (shift_id nullable, orders.waiter_id).');
 
         await seedDatabase();
     } catch (error) {

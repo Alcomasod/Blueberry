@@ -8,13 +8,25 @@ export interface OrderItemInput {
     comment?: string;
 }
 
+export interface CreatedOrderItem {
+    id: number;
+    order_id: number;
+    menu_item_id: number | null;
+    combo_id: number | null;
+    quantity: number;
+    price_at_sale: string | null;
+    combo_price: string | null;
+    waiter_id: number;
+    comment: string | null;
+}
+
 export interface OrderResult {
     id: number;
-    shift_id: number;
+    shift_id: number | null;
     table_id: number | null;
     status: string;
     total_amount: string;
-    items: any[];
+    items: CreatedOrderItem[];
 }
 
 // ==========================================
@@ -22,7 +34,7 @@ export interface OrderResult {
 // ==========================================
 
 export async function createOrder(
-    shiftId: number,
+    shiftId: number | null,
     tableId: number | null,
     items: OrderItemInput[],
     waiterId: number
@@ -45,10 +57,10 @@ export async function createOrder(
         }
 
         const orderResult = await client.query(`
-            INSERT INTO orders (shift_id, table_id, status, total_amount, created_at)
-            VALUES ($1, $2, 'open', 0, NOW())
+            INSERT INTO orders (shift_id, waiter_id, table_id, status, total_amount, created_at)
+            VALUES ($1, $2, $3, 'open', 0, NOW())
             RETURNING *
-        `, [shiftId, tableId]);
+        `, [shiftId, waiterId, tableId]);
 
         const order = orderResult.rows[0];
         let totalAmount = 0;
@@ -149,12 +161,19 @@ export async function payOrder(
 // РЕДАКТИРОВАНИЕ ОТКРЫТОГО ЗАКАЗА
 // ==========================================
 
-async function validateOrderForEditing(orderId: number, shiftId: number) {
-    const result = await pool.query(`
-        SELECT id, status, shift_id FROM orders WHERE id = $1 AND status = 'open' AND shift_id = $2
-    `, [orderId, shiftId]);
+async function validateOrderForEditing(orderId: number, waiterId: number, isAdmin = false) {
+    // Администратор (MANAGE_ALL_OPEN_ORDERS) может редактировать любой открытый заказ.
+    // Остальные — только заказы, которые они создали/обслуживают (orders.waiter_id),
+    // независимо от того, открыта ли у них сейчас смена.
+    let query = `SELECT id, status, shift_id, waiter_id FROM orders WHERE id = $1 AND status = 'open'`;
+    const params: unknown[] = [orderId];
+    if (!isAdmin) {
+        query += ` AND waiter_id = $2`;
+        params.push(waiterId);
+    }
+    const result = await pool.query(query, params);
     if (result.rows.length === 0) {
-        throw new Error('Order not found, already paid/cancelled, or belongs to another shift');
+        throw new Error('Order not found, already paid/cancelled, or belongs to another waiter');
     }
     return result.rows[0];
 }
@@ -177,14 +196,13 @@ async function recalculateOrderTotal(orderId: number): Promise<number> {
     return newTotal;
 }
 
-export async function addItemToOrder(orderId: number, shiftId: number, item: OrderItemInput, waiterId: number) {
+export async function addItemToOrder(orderId: number, waiterId: number, item: OrderItemInput, isAdmin = false) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const orderCheck = await client.query(`SELECT id, status FROM orders WHERE id = $1`, [orderId]);
-        if (orderCheck.rows.length === 0 || orderCheck.rows[0].status !== 'open') {
-            throw new Error('Order not found or already paid/cancelled');
-        }
+        // Проверяем право редактирования (свой заказ или любой — для admin+),
+        // наличие открытой смены при этом не требуется.
+        await validateOrderForEditing(orderId, waiterId, isAdmin);
 
         let price: number = 0;
         let isCombo = false;
@@ -215,11 +233,11 @@ export async function addItemToOrder(orderId: number, shiftId: number, item: Ord
     }
 }
 
-export async function removeItemFromOrder(orderId: number, shiftId: number, itemId: number) {
+export async function removeItemFromOrder(orderId: number, waiterId: number, itemId: number, isAdmin = false) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await validateOrderForEditing(orderId, shiftId);
+        await validateOrderForEditing(orderId, waiterId, isAdmin);
         const deleteResult = await client.query(`DELETE FROM order_items WHERE id = $1 AND order_id = $2 RETURNING *`, [itemId, orderId]);
         if (deleteResult.rows.length === 0) throw new Error('Item not found in this order');
 
@@ -234,12 +252,12 @@ export async function removeItemFromOrder(orderId: number, shiftId: number, item
     }
 }
 
-export async function updateItemQuantity(orderId: number, shiftId: number, itemId: number, newQuantity: number) {
+export async function updateItemQuantity(orderId: number, waiterId: number, itemId: number, newQuantity: number, isAdmin = false) {
     if (newQuantity <= 0) throw new Error('Quantity must be greater than 0. Use DELETE endpoint instead.');
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await validateOrderForEditing(orderId, shiftId);
+        await validateOrderForEditing(orderId, waiterId, isAdmin);
         const updateResult = await client.query(`UPDATE order_items SET quantity = $1 WHERE id = $2 AND order_id = $3 RETURNING *`, [newQuantity, itemId, orderId]);
         if (updateResult.rows.length === 0) throw new Error('Item not found in this order');
 
@@ -278,23 +296,24 @@ export async function getOrdersByRole(
             t.number as table_number,
             z.name as zone_name,
             COUNT(oi.id) as items_count,
-            s.waiter_id,
-            u.full_name as waiter_name
+            COALESCE(o.waiter_id, s.waiter_id) as waiter_id,
+            COALESCE(wu.full_name, u.full_name) as waiter_name
         FROM orders o
         LEFT JOIN tables t ON o.table_id = t.id
         LEFT JOIN zones z ON t.zone_id = z.id
         LEFT JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN shifts s ON o.shift_id = s.id
         LEFT JOIN users u ON s.waiter_id = u.id
+        LEFT JOIN users wu ON o.waiter_id = wu.id
         WHERE 1=1
     `;
 
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     // Официант и кухня видят только свои заказы
     if (role === 'waiter' || role === 'kitchen') {
-        query += ` AND s.waiter_id = $${paramIndex++}`;
+        query += ` AND COALESCE(o.waiter_id, s.waiter_id) = $${paramIndex++}`;
         params.push(waiterId);
     }
     // Админ, директор, sys_admin видят все заказы (дополнительных условий нет)
@@ -304,7 +323,7 @@ export async function getOrdersByRole(
         params.push(status);
     }
 
-    query += ` GROUP BY o.id, t.number, z.name, s.waiter_id, u.full_name ORDER BY o.created_at DESC`;
+    query += ` GROUP BY o.id, t.number, z.name, o.waiter_id, s.waiter_id, u.full_name, wu.full_name ORDER BY o.created_at DESC`;
 
     const result = await pool.query(query, params);
     return result.rows;
@@ -314,7 +333,7 @@ export async function getOrdersByRole(
 // ДЕТАЛИ ЗАКАЗА
 // ==========================================
 
-export async function getOrderDetails(orderId: number, userRole: string, userShiftId: number | null) {
+export async function getOrderDetails(orderId: number, userRole: string, userId: number) {
     let query = `
         SELECT
             o.*,
@@ -325,15 +344,15 @@ export async function getOrderDetails(orderId: number, userRole: string, userShi
                  LEFT JOIN zones z ON t.zone_id = z.id
         WHERE o.id = $1
     `;
-    const params: any[] = [orderId];
+    const params: unknown[] = [orderId];
 
-    if (userRole === 'waiter' || userRole === 'kitchen') {
-        if (userShiftId) {
-            query += ` AND o.shift_id = $2`;
-            params.push(userShiftId);
-        } else {
-            query += ` AND 1=0`;
-        }
+    // Официант и кухня видят только свои заказы (созданные ими — orders.waiter_id,
+    // либо по своей смене для старых заказов).
+    // Администраторы (admin/director/sys_admin) и кальянщики видят любой заказ.
+    const isRestrictedToOwn = userRole === 'waiter' || userRole === 'kitchen';
+    if (isRestrictedToOwn) {
+        query += ` AND COALESCE(o.waiter_id, (SELECT s2.waiter_id FROM shifts s2 WHERE s2.id = o.shift_id)) = $2`;
+        params.push(userId);
     }
 
     const orderRes = await pool.query(query, params);

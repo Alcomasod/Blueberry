@@ -25,7 +25,7 @@ export async function updateCategory(
     isActive?: boolean
 ) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (name !== undefined) {
@@ -124,7 +124,7 @@ export async function updateMenuItem(
     sortOrder?: number
 ) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (categoryId !== undefined) {

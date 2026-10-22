@@ -48,7 +48,7 @@ export async function updateTable(
     reservationComment?: string | null
 ) {
     const updates: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     let paramIndex = 1;
 
     if (number !== undefined) { updates.push(`number = $${paramIndex++}`); values.push(number); }
@@ -77,7 +77,7 @@ export async function updateTable(
 
 export async function updateTableStatus(id: number, status: string) {
     let query = `UPDATE tables SET status = $1`;
-    const values: any[] = [status];
+    const values: unknown[] = [status];
     let paramIndex = 2;
 
     // Умная очистка: если стол освобождают, стираем данные о брони

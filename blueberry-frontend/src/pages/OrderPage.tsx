@@ -1,6 +1,7 @@
 // src/pages/OrdersPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
+import { getApiErrorMessage } from '../lib/apiError';
 import OrderDetailsModal from '../components/OrderDetailsModal';
 import {
     RefreshCw, Clock, Users, CreditCard, Search,
@@ -92,8 +93,8 @@ const OrdersPage = () => {
                 discount_amount: 0
             });
             await fetchData(); // Обновляем список
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка оплаты');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка оплаты'));
         }
     };
 

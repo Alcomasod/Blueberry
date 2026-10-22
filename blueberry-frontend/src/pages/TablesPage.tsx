@@ -1,8 +1,9 @@
 // src/pages/TablesPage.tsx
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
+import { getApiErrorMessage } from '../lib/apiError';
 import { useAuthStore } from '../store/authStore';
+import OrderDetailsModal from '../components/OrderDetailsModal';
 import {
     Users, CheckCircle, XCircle, Clock, RefreshCw,
     Plus, Trash2, Edit
@@ -28,17 +29,24 @@ interface Zone {
     sort_order: number;
 }
 
+interface OpenOrder {
+    id: number;
+    table_id: number | null;
+}
+
 const TablesPage = () => {
     const { user } = useAuthStore();
-    const navigate = useNavigate();
     const isAdmin = user?.role && ['sys_admin', 'director', 'admin'].includes(user.role);
     const canManageStatus = user?.role && ['sys_admin', 'director', 'admin', 'waiter', 'hookah_master', 'hookah_bar'].includes(user.role);
 
     const [tables, setTables] = useState<Table[]>([]);
     const [zones, setZones] = useState<Zone[]>([]);
+    const [openOrdersByTable, setOpenOrdersByTable] = useState<Map<number, number>>(new Map());
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [selectedTable, setSelectedTable] = useState<Table | null>(null);
+    // Заказ, открытый прямо на странице столов (модалка с меню из БД)
+    const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
 
     // Состояния модалок
     const [showAddZoneModal, setShowAddZoneModal] = useState(false);
@@ -70,8 +78,20 @@ const TablesPage = () => {
             ]);
             setTables(tablesRes.data.data);
             setZones(zonesRes.data.data);
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Ошибка загрузки данных');
+
+            // Карта «стол → открытый заказ», чтобы сразу открывать меню заказа
+            try {
+                const ordersRes = await api.get('/orders', { params: { status: 'open' } });
+                const map = new Map<number, number>();
+                for (const o of (ordersRes.data.data || []) as OpenOrder[]) {
+                    if (o.table_id != null) map.set(o.table_id, o.id);
+                }
+                setOpenOrdersByTable(map);
+            } catch {
+                setOpenOrdersByTable(new Map());
+            }
+        } catch (err) {
+            setError(getApiErrorMessage(err, 'Ошибка загрузки данных'));
         } finally {
             setLoading(false);
         }
@@ -90,8 +110,8 @@ const TablesPage = () => {
             setNewZoneSort(0);
             setShowAddZoneModal(false);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка создания зала');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка создания зала'));
         }
     };
 
@@ -100,8 +120,8 @@ const TablesPage = () => {
         try {
             await api.delete(`/zones/${zoneId}`);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка удаления зала');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка удаления зала'));
         }
     };
 
@@ -119,8 +139,8 @@ const TablesPage = () => {
             setNewTableCapacity(4);
             setShowAddTableModal(false);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка создания стола');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка создания стола'));
         }
     };
 
@@ -135,8 +155,8 @@ const TablesPage = () => {
             });
             setEditingTable(null);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка обновления стола');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка обновления стола'));
         }
     };
 
@@ -146,8 +166,8 @@ const TablesPage = () => {
             await api.delete(`/tables/${tableId}`);
             setSelectedTable(null);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка удаления стола');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка удаления стола'));
         }
     };
 
@@ -156,8 +176,8 @@ const TablesPage = () => {
             await api.patch(`/tables/${tableId}/status`, { status });
             setSelectedTable(null);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка смены статуса');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка смены статуса'));
         }
     };
 
@@ -165,15 +185,17 @@ const TablesPage = () => {
         if (!selectedTable) return;
 
         try {
-            await api.post('/orders', {
+            const res = await api.post('/orders', {
                 table_id: selectedTable.id,
                 items: []
             });
 
             setSelectedTable(null);
-            navigate('/orders');
-        } catch (err: any) {
-            const errorMsg = err.response?.data?.error || err.response?.data?.details || 'Ошибка создания заказа';
+            // Сразу открываем модалку заказа с меню из БД — без перехода на другую страницу
+            setActiveOrderId(res.data.data.id);
+            await fetchData();
+        } catch (err) {
+            const errorMsg = getApiErrorMessage(err, 'Ошибка создания заказа');
             alert(errorMsg);
         }
     };
@@ -181,22 +203,28 @@ const TablesPage = () => {
     const handleOpenOrder = async () => {
         if (!selectedTable) return;
 
-        try {
-            const response = await api.get('/orders', {
-                params: { status: 'open' }
-            });
+        // Сначала по уже загруженной карте столов, затем — резервный запрос к API
+        let orderId = openOrdersByTable.get(selectedTable.id);
 
-            const orders = response.data.data;
-            const tableOrder = orders.find((order: any) => order.table_id === selectedTable.id);
-
-            if (tableOrder) {
-                setSelectedTable(null);
-                navigate(`/orders/${tableOrder.id}`);
-            } else {
-                alert('Активный заказ для этого стола не найден');
+        if (orderId === undefined) {
+            try {
+                const response = await api.get('/orders', {
+                    params: { status: 'open' }
+                });
+                const orders = response.data.data as OpenOrder[];
+                const tableOrder = orders.find((order) => order.table_id === selectedTable.id);
+                if (tableOrder) orderId = tableOrder.id;
+            } catch (err) {
+                alert(getApiErrorMessage(err, 'Ошибка поиска заказа'));
+                return;
             }
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка поиска заказа');
+        }
+
+        if (orderId !== undefined) {
+            setSelectedTable(null);
+            setActiveOrderId(orderId);
+        } else {
+            alert('Активный заказ для этого стола не найден');
         }
     };
 
@@ -217,8 +245,8 @@ const TablesPage = () => {
             setReservationForm({ name: '', phone: '', time: '', comment: '' });
             setSelectedTable(null);
             await fetchData();
-        } catch (err: any) {
-            alert(err.response?.data?.error || 'Ошибка бронирования');
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка бронирования'));
         }
     };
 
@@ -554,6 +582,17 @@ const TablesPage = () => {
                         <button type="submit" className="w-full px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition">Сохранить</button>
                     </form>
                 </Modal>
+            )}
+
+            {/* ===== МОДАЛКА: карточка заказа с меню из БД ===== */}
+            {activeOrderId !== null && (
+                <OrderDetailsModal
+                    orderId={activeOrderId}
+                    onClose={() => {
+                        setActiveOrderId(null);
+                        fetchData();
+                    }}
+                />
             )}
         </div>
     );
