@@ -140,6 +140,7 @@ export async function initDatabase() {
           combo_price DECIMAL(10,2),
           waiter_id INT REFERENCES users(id) NOT NULL,
           comment TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
           CHECK (
             (menu_item_id IS NOT NULL AND combo_id IS NULL) OR
             (menu_item_id IS NULL AND combo_id IS NOT NULL)
@@ -248,7 +249,11 @@ export async function initDatabase() {
             ) sub
             WHERE sub.order_id = o.id AND o.waiter_id IS NULL
         `);
-        console.log('✅ Blueberry: Миграции схемы заказов применены (shift_id nullable, orders.waiter_id).');
+        // created_at у позиций — нужен для хронологии карточек в модалке заказа.
+        // Без этой колонки GET /api/orders/:id падал с ошибкой «column oi.created_at
+        // does not exist», а фронтенд показывал «Заказ не найден».
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()`);
+        console.log('✅ Blueberry: Миграции схемы заказов применены (shift_id nullable, orders.waiter_id, order_items.created_at).');
 
         // Состав блюда (подсказка для персонала)
         await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS composition TEXT`);

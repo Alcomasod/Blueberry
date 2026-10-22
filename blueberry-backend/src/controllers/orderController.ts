@@ -7,7 +7,8 @@ import {
     removeItemFromOrder,
     updateItemQuantity,
     getOrdersByRole,       // <-- ЗАМЕНИЛИ getMyOrders НА getOrdersByRole
-    getOrderDetails
+    getOrderDetails,
+    findOpenOrderByTable
 } from '../services/orderService.js';
 import { getActiveShift } from '../services/shiftService.js';
 import { hasPermission, PERMISSIONS, Role } from '../config/permissions.js';
@@ -93,7 +94,13 @@ export async function handleCreateOrder(req: Request, res: Response) {
         if (activeShift) {
             shiftId = activeShift.id;
         } else if (!canManageAnyOrder(role)) {
-            return res.status(400).json({ success: false, error: 'No active shift. Please open a shift first.' });
+            // Требование открытой смены проверяем ТОЛЬКО когда на столе реально
+            // нет открытого заказа для «подхвата». Иначе официант получал
+            // «No active shift», пытаясь продолжить админский заказ на своём столе.
+            const existing = table_id ? await findOpenOrderByTable(table_id) : null;
+            if (!existing) {
+                return res.status(400).json({ success: false, error: 'No active shift. Please open a shift first.' });
+            }
         }
 
         const order = await createOrder(
