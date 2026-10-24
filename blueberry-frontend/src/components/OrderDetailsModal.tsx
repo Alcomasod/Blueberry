@@ -4,7 +4,7 @@ import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
 import { formatAmount } from '../lib/format';
 import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
-import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History } from 'lucide-react';
+import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History, Check } from 'lucide-react';
 import Modal from './Modal';
 import { useAuthStore } from '../store/authStore';
 
@@ -19,78 +19,76 @@ interface OrderItem {
     quantity: number;
     price_at_sale: number;
     line_total: number;
-    comment: string;
-    created_at: string;
-    waiter_id: number | null;
-    waiter_name: string | null;
+    comment?: string | null;
 }
 
-interface HistoryEntry {
+interface OrderHistoryEntry {
     id: number;
     action: string;
     details: string;
+    author: string;
     created_at: string;
-    user_name: string | null;
 }
 
 interface Order {
     id: number;
     table_number: string;
     zone_name: string;
-    total_amount: string;
     status: string;
-    comment: string | null;
-    waiter_id: number | null;
-    waiter_name: string | null;
+    total_amount: number;
+    comment?: string | null;
     items: OrderItem[];
-    history: HistoryEntry[];
 }
 
-const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
+export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModalProps) {
+    const user = useAuthStore((s) => s.user);
     const [order, setOrder] = useState<Order | null>(null);
-    const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
+    const [menuItems, setMenuItems] = useState<FlatMenuItem[]>([]);
+    const [search, setSearch] = useState('');
+    const [activeCategory, setActiveCategory] = useState<string>('all');
     const [loading, setLoading] = useState(true);
-    const [showAddItem, setShowAddItem] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [activeCategoryKey, setActiveCategoryKey] = useState<string>('all');
+    const [showAddPanel, setShowAddPanel] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
-    // Комментарий к заказу (персона гостей, предпочтения: «убрать лук», «без сахара»)
+    const [history, setHistory] = useState<OrderHistoryEntry[]>([]);
     const [orderComment, setOrderComment] = useState('');
     const [commentDirty, setCommentDirty] = useState(false);
     const [saving, setSaving] = useState(false);
-    const currentUserId = useAuthStore((state) => state.user?.id);
 
     const fetchData = async () => {
-        setLoading(true);
-        try {
-            const [orderRes, menuRes] = await Promise.all([
-                api.get(`/orders/${orderId}`),
-                api.get('/menu'),
-            ]);
-
-            setOrder(orderRes.data.data);
-            // Синхронизируем поле комментария, если пользователь ещё не редактировал его
-            setOrderComment((prev) => (commentDirty ? prev : orderRes.data.data.comment ?? ''));
-
-            // GET /api/menu возвращает ДЕРЕВО категорий:
-            // [{ id, name, items: [{ id, name, price }], children: [...] }, ...]
-            // Строим из него каталог по категориям (горячее, салаты и т.д.).
-            const builtCatalog = buildCatalog(menuRes.data.data);
-            console.log(
-                `✅ Каталог меню: ${builtCatalog.length} категорий, ` +
-                    `${builtCatalog.reduce((n, c) => n + c.items.length, 0)} позиций`
-            );
-            setCatalog(builtCatalog);
-        } catch (err) {
-            console.error('❌ Error fetching order details:', err);
-        } finally {
+            try {
+                const [ordersRes, menuRes] = await Promise.all([
+                    api.get(`/orders/${orderId}`),
+                    api.get('/menu'),
+                ]);
+                const o = ordersRes.data.data;
+                setOrder(o);
+                setMenuItems(menuRes.data.data.filter((m: FlatMenuItem) => m.is_active));
+                // синхронизируем поле комментария, если пользователь ещё не редактировал его
+                setOrderComment((prev) => (commentDirty ? prev : o.comment ?? ''));
+            } catch (err) {
+                alert(getApiErrorMessage(err, 'Не удалось загрузить заказ'));
+            } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
         fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orderId]);
+
+    const catalog: CatalogCategory[] = useMemo(
+        () => buildCatalog(menuItems, search),
+        [menuItems, search],
+    );
+
+    const visibleCategories = useMemo(
+        () =>
+            activeCategory === 'all'
+                ? catalog
+                : catalog.filter((c) => c.category === activeCategory),
+        [catalog, activeCategory],
+    );
 
     const handleAddItem = async (item: FlatMenuItem) => {
         try {
@@ -98,16 +96,16 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
                 menu_item_id: item.id,
                 quantity: 1,
             });
-            setShowAddItem(false);
-            setSearchTerm('');
             await fetchData();
         } catch (err) {
-            console.error('Ошибка добавления:', err);
             alert(getApiErrorMessage(err, 'Ошибка добавления позиции'));
         }
     };
 
-    const handleUpdateQuantity = async (itemId: number, newQty: number) => {
+    const handleQtyChange = async (itemId: number, delta: number) => {
+        const it = order?.items.find((i) => i.id === itemId);
+        if (!it) return;
+        const newQty = it.quantity + delta;
         if (newQty <= 0) return handleRemoveItem(itemId);
         try {
             await api.patch(`/orders/${orderId}/items/${itemId}`, { quantity: newQty });
@@ -118,7 +116,7 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
     };
 
     const handleRemoveItem = async (itemId: number) => {
-        if (!confirm('Удалить эту позицию из заказа?')) return;
+        if (!confirm('Удалить позицию?')) return;
         try {
             await api.delete(`/orders/${orderId}/items/${itemId}`);
             await fetchData();
@@ -127,240 +125,180 @@ const OrderDetailsModal = ({ orderId, onClose }: OrderDetailsModalProps) => {
         }
     };
 
-    const handlePayOrder = async () => {
-        if (!confirm(`Оплатить заказ на сумму ${formatAmount(order?.total_amount)} руб.?`)) return;
+    const handleSaveComment = async () => {
+        if (!commentDirty) return true;
         try {
-            await api.post(`/orders/${orderId}/pay`, {
-                payment_method: 'card',
-                tip_amount: 0,
-                discount_amount: 0,
-            });
-            alert('Заказ успешно оплачен!');
-            onClose();
+            await api.patch(`/orders/${orderId}/comment`, { comment: orderComment });
+            setCommentDirty(false);
+            return true;
         } catch (err) {
-            alert(getApiErrorMessage(err, 'Ошибка оплаты'));
+            alert(getApiErrorMessage(err, 'Не удалось сохранить комментарий'));
+            return false;
         }
     };
 
-    // Каталог по категориям (горячее, салаты и т.д.) + поиск по всему меню.
-    const visibleCategories = useMemo(() => {
-        const term = searchTerm.trim().toLowerCase();
-        if (!term) {
-            return activeCategoryKey === 'all'
-                ? catalog
-                : catalog.filter((c) => c.key === activeCategoryKey);
+    const handlePayOrder = async () => {
+        if (!(await handleSaveComment())) return;
+        try {
+            await api.patch(`/orders/${orderId}`, { status: 'paid' });
+            onClose();
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка оплаты заказа'));
         }
-        // При поиске ищем по всем категориям
-        return catalog
-            .map((c) => ({
-                ...c,
-                items: c.items.filter((i) => i.name.toLowerCase().includes(term)),
-            }))
-            .filter((c) => c.items.length > 0);
-    }, [catalog, searchTerm, activeCategoryKey]);
+    };
 
-    const totalFound = visibleCategories.reduce((n, c) => n + c.items.length, 0);
+    const fetchHistory = async () => {
+        setShowHistory((v) => !v);
+        if (history.length === 0) {
+            try {
+                const res = await api.get(`/orders/${orderId}/history`);
+                setHistory(res.data.data);
+            } catch (err) {
+                alert(getApiErrorMessage(err, 'История недоступна'));
+            }
+        }
+    };
 
-    if (loading) {
-        return (
-            <Modal isOpen={true} onClose={onClose} title="Загрузка...">
-                <div className="flex justify-center py-4">
-                    <Loader2 className="animate-spin text-blueberry-600" size={24} />
-                </div>
-            </Modal>
-        );
-    }
-
-    if (!order) {
-        return (
-            <Modal isOpen={true} onClose={onClose} title="Ошибка">
-                <p>Заказ не найден.</p>
-            </Modal>
-        );
-    }
+    const total = useMemo(
+        () => (order?.items ?? []).reduce((sum, i) => sum + Number(i.line_total), 0),
+        [order],
+    );
 
     return (
-        <>
-            <Modal isOpen={true} onClose={onClose} title={`Заказ #${order.id} • Стол ${order.table_number || 'Без стола'}`}>
+        <Modal title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'} onClose={onClose}>
+            {loading ? (
+                <div className="flex justify-center py-10">
+                    <Loader2 className="animate-spin text-blueberry-600" size={32} />
+                </div>
+            ) : (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center bg-blueberry-50 p-3 rounded-lg">
-                        <div>
-                            <p className="text-xs text-gray-500">Зона</p>
-                            <p className="font-semibold text-blueberry-900">{order.zone_name || 'Не указана'}</p>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-xs text-gray-500">Итого</p>
-                            <p className="text-xl font-bold text-blueberry-900">{formatAmount(order.total_amount)} ₽</p>
-                        </div>
-                    </div>
-
-                    {/* Карточки позиций в хронологическом порядке: кто и когда добавил */}
-                    <div className="max-h-60 overflow-y-auto space-y-2 border-t border-b py-2">
-                        {order.items.length === 0 ? (
-                            <p className="text-center text-gray-400 py-4">Заказ пуст. Добавьте позиции.</p>
+                    {/* Позиции */}
+                    <div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-2">Позиции</h3>
+                        {order && order.items.length > 0 ? (
+                            <ul className="divide-y divide-gray-100">
+                                {order.items.map((it) => (
+                                    <li key={it.id} className="py-2 flex items-center gap-2">
+                                        <span className="flex-1 text-sm">
+                                            {it.item_name}
+                                            {it.comment ? <em className="ml-1 text-xs text-gray-500">({it.comment})</em> : null}
+                                        </span>
+                                        <button onClick={() => handleQtyChange(it.id, -1)} className="p-1 rounded hover:bg-gray-100"><Minus size={14} /></button>
+                                        <span className="w-8 text-center text-sm font-medium">{it.quantity}</span>
+                                        <button onClick={() => handleQtyChange(it.id, 1)} className="p-1 rounded hover:bg-gray-100"><Plus size={14} /></button>
+                                        <span className="w-20 text-right text-sm">{formatAmount(Number(it.line_total))}</span>
+                                        <button onClick={() => handleRemoveItem(it.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
+                                    </li>
+                                ))}
+                            </ul>
                         ) : (
-                            [...order.items]
-                                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-                                .map((item) => (
-                                <div key={item.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg">
-                                    <div className="flex-1">
-                                        <p className="font-medium text-gray-800 text-sm">{item.item_name}</p>
-                                        <p className="text-xs text-gray-500">
-                                            {formatAmount(item.line_total)} ₽
-                                            {item.waiter_name && (
-                                                <span className={item.waiter_id === currentUserId ? 'text-green-700 ml-1' : 'text-orange-600 ml-1'}>
-                                                    • {item.waiter_name}
-                                                </span>
-                                            )}
-                                            <span className="text-gray-400 ml-1">
-                                                {new Date(item.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                                            </span>
-                                        </p>
-                                        {item.comment && <p className="text-xs italic text-gray-500">«{item.comment}»</p>}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)} className="p-1 bg-gray-200 rounded hover:bg-gray-300">
-                                            <Minus size={14} />
-                                        </button>
-                                        <span className="w-6 text-center font-medium">{item.quantity}</span>
-                                        <button onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)} className="p-1 bg-gray-200 rounded hover:bg-gray-300">
-                                            <Plus size={14} />
-                                        </button>
-                                        <button onClick={() => handleRemoveItem(item.id)} className="p-1 text-red-500 hover:bg-red-50 rounded ml-2">
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))
+                            <p className="text-sm text-gray-400">Позиций пока нет — добавьте блюда из каталога.</p>
                         )}
                     </div>
 
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => setShowHistory((v) => !v)}
-                            className={`flex items-center justify-center gap-1 px-3 py-2 rounded-lg transition ${
-                                showHistory ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                            title="История изменений заказа"
-                        >
-                            <History size={16} />
-                        </button>
-                        <button
-                            onClick={() => setShowAddItem(true)}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-                        >
-                            <Plus size={16} /> Добавить
-                        </button>
-                        <button
-                            onClick={handlePayOrder}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition"
-                        >
-                            <CreditCard size={16} /> Оплатить
-                        </button>
+                    {/* Итого */}
+                    <div className="rounded-md bg-blueberry-50 px-3 py-2 flex justify-between font-bold text-blueberry-900">
+                        <span>Итого</span>
+                        <span>{formatAmount(total)}</span>
                     </div>
 
-                    {/* Хронология всех изменений заказа (каждое изменение — отдельная карточка) */}
-                    {showHistory && (
-                        <div className="border-t pt-2 max-h-48 overflow-y-auto space-y-1">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">История изменений</p>
-                            {(order.history ?? []).length === 0 ? (
-                                <p className="text-xs text-gray-400 py-2">Изменений пока нет.</p>
-                            ) : (
-                                (order.history ?? []).map((h) => (
-                                    <div key={h.id} className="flex items-start gap-2 text-xs bg-blueberry-50 rounded-lg p-2">
-                                        <span className="text-gray-400 whitespace-nowrap">
-                                            {new Date(h.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
-                                        <span className="text-gray-700">
-                                            <span className="font-medium">{h.user_name || 'Система'}</span> — {h.details}
-                                        </span>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </div>
-            </Modal>
-
-            <Modal isOpen={showAddItem} onClose={() => setShowAddItem(false)} title="Добавить позицию">
-                <div className="space-y-4">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-3 text-gray-400" size={16} />
-                        <input
-                            type="text"
-                            placeholder="Поиск по меню..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blueberry-500"
-                            autoFocus
+                    {/* Комментарий к заказу */}
+                    <div>
+                        <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Комментарий к заказу</label>
+                        <textarea
+                            value={orderComment}
+                            onChange={(e) => { setOrderComment(e.target.value); setCommentDirty(true); }}
+                            rows={2}
+                            placeholder="Персона гостей, предпочтения: убрать лук из салата, добавить сахар в чай…"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blueberry-500 focus:border-blueberry-500"
                         />
                     </div>
 
-                    {/* Каталог: вкладки категорий (горячее, салаты и т.д.) */}
-                    {!searchTerm && catalog.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                            <button
-                                onClick={() => setActiveCategoryKey('all')}
-                                className={`px-3 py-1 rounded-full text-sm font-medium transition ${
-                                    activeCategoryKey === 'all'
-                                        ? 'bg-blueberry-600 text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                            >
-                                Все
-                            </button>
-                            {catalog.map((cat) => (
+                    {/* Каталог добавления позиции */}
+                    {showAddPanel && (
+                        <div className="border border-gray-200 rounded-md p-3 space-y-3">
+                            <div className="relative">
+                                <Search size={16} className="absolute left-2 top-2.5 text-gray-400" />
+                                <input
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="Поиск по меню…"
+                                    className="w-full rounded-md border border-gray-300 pl-8 pr-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div className="flex flex-wrap gap-1">
                                 <button
-                                    key={cat.key}
-                                    onClick={() => setActiveCategoryKey(cat.key)}
-                                    className={`px-3 py-1 rounded-full text-sm font-medium transition ${
-                                        activeCategoryKey === cat.key
-                                            ? 'bg-blueberry-600 text-white'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                >
-                                    {cat.name}
-                                </button>
-                            ))}
+                                    onClick={() => setActiveCategory('all')}
+                                    className={`px-2 py-1 rounded-full text-xs ${activeCategory === 'all' ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                                >Все</button>
+                                {catalog.map((c) => (
+                                    <button
+                                        key={c.category}
+                                        onClick={() => setActiveCategory(c.category)}
+                                        className={`px-2 py-1 rounded-full text-xs ${activeCategory === c.category ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                                    >{c.category}</button>
+                                ))}
+                            </div>
+                            <div className="max-h-56 overflow-y-auto space-y-3">
+                                {visibleCategories.map((cat) => (
+                                    <div key={cat.category}>
+                                        <p className="text-xs font-semibold text-gray-500 mb-1">{cat.category}</p>
+                                        <div className="grid grid-cols-2 gap-1">
+                                            {cat.items.map((mi) => (
+                                                <button
+                                                    key={mi.id}
+                                                    onClick={() => handleAddItem(mi)}
+                                                    className="text-left px-2 py-1.5 rounded hover:bg-blueberry-50 text-sm flex justify-between gap-2"
+                                                >
+                                                    <span className="truncate">{mi.name}</span>
+                                                    <span className="text-gray-500 shrink-0">{formatAmount(mi.price)}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
 
-                    <div className="max-h-72 overflow-y-auto space-y-3">
-                        {totalFound === 0 ? (
-                            <p className="text-center text-gray-400 py-4">Ничего не найдено или меню пусто</p>
-                        ) : (
-                            visibleCategories.map((cat) => (
-                                <div key={cat.key}>
-                                    <p className="sticky top-0 bg-white text-xs font-semibold uppercase tracking-wide text-gray-500 py-1">
-                                        {cat.name}
-                                    </p>
-                                    <div className="space-y-2">
-                                        {cat.items.map((item) => (
-                                            <button
-                                                key={item.id}
-                                                onClick={() => handleAddItem(item)}
-                                                className="w-full flex justify-between items-start p-2 bg-gray-50 rounded-lg hover:bg-blueberry-50 transition text-left"
-                                            >
-                                                <span className="font-medium text-sm text-gray-800">
-                                                    {item.name}
-                                                    {item.composition && (
-                                                        <span className="block text-xs font-normal text-gray-500 mt-0.5 line-clamp-2">
-                                                            {item.composition}
-                                                        </span>
-                                                    )}
-                                                </span>
-                                                <span className="text-sm text-blueberry-600 font-semibold ml-2 whitespace-nowrap">{item.price} ₽</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))
-                        )}
+                    {/* История изменений */}
+                    {showHistory && (
+                        <div className="border border-gray-200 rounded-md p-3 max-h-48 overflow-y-auto">
+                            <h3 className="text-xs font-semibold uppercase text-gray-500 mb-2">История изменений</h3>
+                            <ol className="space-y-1">
+                                {history.map((h) => (
+                                    <li key={h.id} className="text-xs text-gray-600">
+                                        <span className="font-mono">{new Date(h.created_at).toLocaleTimeString('ru-RU')}</span>{' '}
+                                        <b>{h.author}</b>: {h.details}
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
+
+                    {/* Большая кнопка СОХРАНИТЬ */}
+                    <button
+                        onClick={handleSaveComment}
+                        disabled={saving || !commentDirty}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blueberry-600 text-white text-base font-bold rounded-lg hover:bg-blueberry-700 transition disabled:opacity-50"
+                    >
+                        {saving ? <Loader2 className="animate-spin" size={20} /> : <Check size={20} />} Сохранить
+                    </button>
+
+                    {/* Ряд дополнительных действий */}
+                    <div className="flex gap-2">
+                        <button onClick={fetchHistory} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm">
+                            <History size={16} /> История
+                        </button>
+                        <button onClick={() => setShowAddPanel((v) => !v)} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-green-100 text-green-800 hover:bg-green-200 text-sm">
+                            <Plus size={16} /> Добавить блюдо
+                        </button>
+                        <button onClick={handlePayOrder} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-blueberry-100 text-blueberry-800 hover:bg-blueberry-200 text-sm">
+                            <CreditCard size={16} /> Оплатить
+                        </button>
                     </div>
                 </div>
-            </Modal>
-        </>
+            )}
+        </Modal>
     );
-};
-
-export default OrderDetailsModal;
+}
