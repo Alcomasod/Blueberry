@@ -58,6 +58,36 @@ const REFRESH_MS = 5000;      // опрос доски каждые 5 секун
 const SOFT_LIMIT_SEC = 5 * 60; // жёлтый таймер
 const HARD_LIMIT_SEC = 10 * 60; // красный таймер
 
+// Право управлять статусами: кухня, бар, кальянный мастер и администраторы+
+// (совпадает с бэкендом: пермишен MANAGE_HOOKAH_ORDERS)
+const KDS_MANAGE_ROLES = ['kitchen', 'hookah_bar', 'hookah_master', 'admin', 'director', 'sys_admin'];
+
+/**
+ * Fallback-определение роли из JWT без проверки подписи — только для UI-границ
+ * доступа (например, если профиль в localStorage пришёл со старой версии фронта).
+ * Реальную безопасность по-прежнему обеспечивает бэкенд.
+ */
+function getRoleFallback(user: { role?: string } | null | undefined): string | null {
+    if (user?.role) return user.role;
+    try {
+        const token: string | null = useAuthStore.getState().token;
+        if (!token) return null;
+        const payloadB64 = token.split('.')[1];
+        if (!payloadB64) return null;
+        const json = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
+        const parsed = JSON.parse(json) as { role?: string };
+        return parsed.role ?? null;
+    } catch {
+        return null;
+    }
+}
+
+interface FlashMessage {
+    text: string;
+    type: 'error' | 'success';
+    id: number;
+}
+
 const KitchenPage = () => {
     const user = useAuthStore((s) => s.user);
     const [board, setBoard] = useState<Board>({ active: [], ready: [] });
@@ -66,9 +96,21 @@ const KitchenPage = () => {
     const [loading, setLoading] = useState(true);
     const [now, setNow] = useState(Date.now());
     const busyRef = useRef<Set<number>>(new Set());
+    const [flash, setFlash] = useState<FlashMessage | null>(null);
 
-    // Право менять статусы: кухня, бар, администраторы+ (совпадает с бэкендом)
-    const canManage = !!user && ['kitchen', 'hookah_bar', 'hookah_master', 'admin', 'director', 'sys_admin'].includes(user.role);
+    // Право менять статусы: роль из профиля, при отсутствии — fallback из JWT
+    const effectiveRole = getRoleFallback(user);
+    const canManage = !!effectiveRole && KDS_MANAGE_ROLES.includes(effectiveRole);
+
+    // Всплывающее уведомление с таймером (не исчезает при перерисовке часов)
+    const showFlash = (text: string, type: FlashMessage['type']) => {
+        setFlash({ text, type, id: Date.now() });
+    };
+    useEffect(() => {
+        if (!flash) return;
+        const t = setTimeout(() => setFlash(null), 6000);
+        return () => clearTimeout(t);
+    }, [flash]);
 
     const fetchBoard = useCallback(async () => {
         try {
@@ -108,8 +150,9 @@ const KitchenPage = () => {
         });
         try {
             await api.patch(`/kds/items/${item.id}/status`, { status: next });
+            showFlash(`«${item.name}»: ${STATUS_LABELS[next]}`, 'success');
         } catch (err) {
-            setError(getApiErrorMessage(err, 'Не удалось изменить статус'));
+            showFlash(getApiErrorMessage(err, 'Не удалось изменить статус'), 'error');
         } finally {
             busyRef.current.delete(item.id);
             fetchBoard();
@@ -258,7 +301,24 @@ const KitchenPage = () => {
 
             {error && (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
+                    ⚠️ {error}
+                </div>
+            )}
+
+            {/* Всплывающее уведомление о последнем действии — видно несколько секунд */}
+            {flash && (
+                <div
+                    className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-3 text-sm font-semibold shadow-lg transition-all ${
+                        flash.type === 'error'
+                            ? 'border border-red-300 bg-red-600 text-white'
+                            : 'border border-emerald-300 bg-emerald-600 text-white'
+                    }`}
+                    role="status"
+                    onClick={() => setFlash(null)}
+                >
+                    {flash.type === 'error' ? '⛔ ' : '✅ '}
+                    {flash.text}
+                    <span className="ml-2 opacity-70">(нажмите, чтобы скрыть)</span>
                 </div>
             )}
 
