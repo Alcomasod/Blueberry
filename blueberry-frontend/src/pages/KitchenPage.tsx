@@ -137,16 +137,26 @@ const KitchenPage = () => {
     const changeStatus = async (item: KdsItem, next: KdsStatus) => {
         if (busyRef.current.has(item.id)) return;
         busyRef.current.add(item.id);
-        // Оптимистичный перевод
-        setBoard((prev) => {
-            const move = (list: KdsItem[]) => list.map((i) =>
-                i.id === item.id ? { ...i, status: next, preparing_at: next === 'preparing' && !i.preparing_at ? new Date().toISOString() : i.preparing_at } : i
-            );
-            const active = [...move(prev.active), ...move(prev.ready)];
-            if (next === 'ready') {
-                return { active: active.filter(i => i.status !== 'ready'), ready: active.filter(i => i.status === 'ready') };
-            }
-            return { active: active.filter(i => i.status !== 'ready'), ready: active.filter(i => i.status === 'ready') };
+        // Оптимистичный перевод.
+        // Явные аннотации типов параметра (list, i) и возвращаемого значения (Board)
+        // предотвращают ошибку TS «inconsistent types deduced for parameter ...»
+        // при выводе типов в замыканиях внутри setBoard.
+        setBoard((prev): Board => {
+            const move = (list: KdsItem[]): KdsItem[] =>
+                list.map((i: KdsItem): KdsItem =>
+                    i.id === item.id
+                        ? {
+                            ...i,
+                            status: next,
+                            preparing_at: next === 'preparing' && !i.preparing_at ? new Date().toISOString() : i.preparing_at,
+                        }
+                        : i
+                );
+            const all: KdsItem[] = [...move(prev.active), ...move(prev.ready)];
+            return {
+                active: all.filter((i: KdsItem) => i.status !== 'ready'),
+                ready: all.filter((i: KdsItem) => i.status === 'ready'),
+            };
         });
         try {
             await api.patch(`/kds/items/${item.id}/status`, { status: next });
