@@ -26,66 +26,86 @@ export interface Category {
  */
 export async function getMenuTree(includeInactive = false): Promise<Category[]> {
     // 1. Категории: COALESCE защищает от NULL-флага is_active у старых seed-строк.
-    const categoriesRes = await pool.query(
-        `SELECT id, name, parent_id, sort_order
-         FROM categories
-                  ${includeInactive ? '' : 'WHERE COALESCE(is_active, TRUE) = TRUE'}
-         ORDER BY sort_order ASC`,
-    );
-    let categories = categoriesRes.rows;
-
-    // Страховка для старых миграций БД: если в схеме не оказалось колонки
-    // is_active (или сортировки), запрос падает — повторяем упрощённый вариант,
-    // чтобы страница «Меню» никогда не оставалась пустой из-за схемы.
-    if (categories.length === 0 && !includeInactive) {
-        try {
-            const fallbackRes = await pool.query(`SELECT id, name, parent_id, 0 AS sort_order FROM categories`);
-            categories = fallbackRes.rows;
-        } catch {
-            /* оставляем пустой список */
-        }
+    // Скрытые категории (is_active = FALSE) не показываем никому — страница «Меню»
+    // для всех ролей отображает активный гостевой вид меню.
+    // Если в старой схеме нет колонок is_active/sort_order — используем упрощённый
+    // запрос, чтобы страница «Меню» никогда не оставалась пустой из-за схемы БД.
+    let categories: any[] = [];
+    try {
+        const categoriesRes = await pool.query(
+            `SELECT id, name, parent_id, sort_order
+             FROM categories
+             WHERE COALESCE(is_active, TRUE) = TRUE
+             ORDER BY sort_order ASC`,
+        );
+        categories = categoriesRes.rows;
+    } catch (err) {
+        console.warn('menuService: расширенный запрос категорий не удался, пробую упрощённый:', (err as Error).message);
+        const fallbackRes = await pool.query(`SELECT id, name, parent_id, 0 AS sort_order FROM categories`);
+        categories = fallbackRes.rows;
     }
 
-    // 2. Позиции: LEFT JOIN LATERAL на последнюю действующую цену —
-    // блюдо без записи цены не теряется из меню, а показывается с ценой 0.
-    const itemsRes = await pool.query(
-        `SELECT m.id, m.name, m.category_id, m.description,
-                COALESCE(p.price, 0) AS price,
-                m.is_for_guests, m.is_available AS is_active, m.sort_order, m.composition
-         FROM menu_items m
-                  LEFT JOIN LATERAL (
-             SELECT mp.price
-             FROM menu_item_prices mp
-             WHERE mp.menu_item_id = m.id AND mp.valid_to IS NULL
-             ORDER BY mp.valid_from DESC
-                 LIMIT 1
-    ) p ON TRUE
-             ${includeInactive ? '' : 'WHERE COALESCE(m.is_available, TRUE) = TRUE'}
-         ORDER BY m.sort_order ASC`,
-    );
-    let items = itemsRes.rows;
-
-    // Аналогичная страховка для позиций меню (отсутствующие is_available/sort_order/composition).
-    if (items.length === 0) {
-        try {
-            const anyItemsRes = await pool.query(
-                `SELECT m.id, m.name, m.category_id,
+    // 2. Позиции: берём ВСЕ позиции меню без фильтра по is_available —
+    // страницу «Меню» должен видеть персонал любых ролей, а статус доступности
+    // отдаётся флагом is_active и затеняется на фронтенде (плюс фильтр
+    // «Показывать скрытые» у администратора).
+    // LEFT JOIN LATERAL на последнюю действующую цену — блюдо без записи цены
+    // не теряется из меню, а показывается с ценой 0.
+    // Fallback-запросы по очереди убавляют необязательные колонки
+    // (composition → is_for_guests/is_available/sort_order/description),
+    // подстраиваясь под старую схему БД.
+    const itemQueries = [
+        {
+            sql: `SELECT m.id, m.name, m.category_id, m.description,
+                        COALESCE(p.price, 0) AS price,
+                        m.is_for_guests, m.is_available AS is_active, m.sort_order, m.composition
+                 FROM menu_items m
+                          LEFT JOIN LATERAL (
+                     SELECT mp.price
+                     FROM menu_item_prices mp
+                     WHERE mp.menu_item_id = m.id AND mp.valid_to IS NULL
+                     ORDER BY mp.valid_from DESC
+                         LIMIT 1
+        ) p ON TRUE
+                 ORDER BY m.sort_order ASC`,
+            normalize: (r: any) => r,
+        },
+        {
+            sql: `SELECT m.id, m.name, m.category_id, m.description,
+                        COALESCE((SELECT mp.price FROM menu_item_prices mp
+                                  WHERE mp.menu_item_id = m.id AND mp.valid_to IS NULL
+                                  ORDER BY mp.valid_from DESC LIMIT 1), 0) AS price,
+                        m.is_for_guests, m.is_available AS is_active, m.sort_order
+                 FROM menu_items m
+                 ORDER BY m.sort_order ASC`,
+            normalize: (r: any) => ({ ...r, composition: null }),
+        },
+        {
+            sql: `SELECT m.id, m.name, m.category_id,
                         COALESCE((SELECT mp.price FROM menu_item_prices mp
                                   WHERE mp.menu_item_id = m.id AND mp.valid_to IS NULL
                                   ORDER BY mp.valid_from DESC LIMIT 1), 0) AS price
                  FROM menu_items m`,
-            );
-            if (anyItemsRes.rows.length > 0) {
-                items = anyItemsRes.rows.map((r) => ({
-                    ...r,
-                    description: null,
-                    composition: null,
-                    is_for_guests: true,
-                    is_active: true,
-                }));
-            }
-        } catch {
-            /* оставляем пустой список */
+            normalize: (r: any) => ({
+                ...r,
+                description: null,
+                composition: null,
+                is_for_guests: true,
+                is_active: true,
+                sort_order: 0,
+            }),
+        },
+    ];
+
+    let items: any[] = [];
+    for (const q of itemQueries) {
+        try {
+            const res = await pool.query(q.sql);
+            items = res.rows.map(q.normalize);
+            if (items.length > 0) break;
+        } catch (err) {
+            console.warn('menuService: запрос позиций меню не удался, пробую более простой:', (err as Error).message);
+            continue;
         }
     }
 
@@ -148,20 +168,15 @@ export async function getMenuTree(includeInactive = false): Promise<Category[]> 
         });
     }
 
-    // Пустые категории без блюд скрываем из гостевого вида (includeInactive=false),
-    // но показываем администратору — ему нужно видеть все свои категории.
-    if (!includeInactive) {
-        const pruneEmpty = (list: Category[]): Category[] =>
-            list
-                .map((cat) => ({ ...cat, children: pruneEmpty(cat.children) }))
-                .filter((cat) => cat.items.length > 0 || cat.children.length > 0);
-        return pruneEmpty(rootCategories);
-    }
-
     // Сортируем дочерние категории внутри каждой категории (на всякий случай)
     for (const cat of categoryMap.values()) {
         cat.children.sort((a, b) => a.sort_order - b.sort_order);
     }
 
-    return rootCategories;
+    // Пустые категории без блюд скрываем из дерева — они не несут информации.
+    const pruneEmpty = (list: Category[]): Category[] =>
+        list
+            .map((cat) => ({ ...cat, children: pruneEmpty(cat.children) }))
+            .filter((cat) => cat.items.length > 0 || cat.children.length > 0);
+    return pruneEmpty(rootCategories);
 }
