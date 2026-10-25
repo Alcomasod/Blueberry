@@ -11,12 +11,25 @@ import pool from '../config/db.js';
 export const KDS_STATUSES = ['new', 'preparing', 'ready', 'served'] as const;
 export type KdsStatus = typeof KDS_STATUSES[number];
 
-// Авто-миграция: колонки статусов KDS (вызывается из database/init.ts)
+// Авто-миграция: колонки статусов KDS (вызывается из database/init.ts).
+// Каждая миграция выполняется изолированно: если у какой-то таблицы нет
+// ожидаемой колонки или прав недостаточно, остальные миграции всё равно
+// применятся, а ошибка попадёт в логи вместо тихого пропуска.
+async function safeAlter(sql: string): Promise<void> {
+    try {
+        await pool.query(sql);
+    } catch (e) {
+        console.error('⚠️ Blueberry KDS: не удалось выполнить миграцию:', sql, '\n   Причина:', (e as Error).message);
+    }
+}
+
 export async function ensureKdsSchema(): Promise<void> {
-    await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(20) NOT NULL DEFAULT 'new'`);
-    await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS preparing_at TIMESTAMP`);
+    await safeAlter(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS item_status VARCHAR(20) NOT NULL DEFAULT 'new'`);
+    await safeAlter(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS preparing_at TIMESTAMP`);
+    // Страховка от NULL-значений у строк, созданных до появления колонки
+    await safeAlter(`UPDATE order_items SET item_status = 'new' WHERE item_status IS NULL`);
     // Подсказка для повара/бармена: зона подачи позиции (Кухня / Бар / Бой посуды / Допы)
-    await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS station VARCHAR(30)`);
+    await safeAlter(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS station VARCHAR(30)`);
 }
 
 // Зона подачи позиции по дереву категорий меню.
@@ -160,13 +173,18 @@ export async function updateKdsItemStatus(
     if (currentRes.rows.length === 0) return null;
     const current = currentRes.rows[0] as { id: number; order_id: number; status: string };
 
-    const allowed: Record<string, string[]> = {
-        new: ['preparing'],
-        preparing: ['ready', 'new'],
-        ready: ['served', 'preparing'],
-        served: [],
-    };
-    if (!allowed[current.status]?.includes(nextStatus)) {
+    // Разрешённые переходы. В отличие от строгой машины состояний, здесь
+    // допускается «перепрыгивание» вперёд (new -> ready и т.п.): на практике
+    // кухню часто отмечают готовой без промежуточного «Готовится», а
+    // администратор может любой статус поставить вручную. Откат назад —
+    // только соседний шаг (served -> ready -> preparing -> new).
+    const ORDER: KdsStatus[] = ['new', 'preparing', 'ready', 'served'];
+    const fromIdx = ORDER.indexOf(current.status as KdsStatus);
+    const toIdx = ORDER.indexOf(nextStatus);
+    if (toIdx < 0) {
+        throw new Error(`Неизвестный статус: ${nextStatus}`);
+    }
+    if (fromIdx < 0 || toIdx > fromIdx + 1) {
         throw new Error(`Недопустимый переход статуса: ${current.status} → ${nextStatus}`);
     }
 
