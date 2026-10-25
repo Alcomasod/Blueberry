@@ -9,11 +9,8 @@ import OrdersPage from './pages/OrderPage';
 import OrderDetailsPage from "./pages/OrderDetailsPage.tsx";
 import DashboardPage from "./pages/DashboardPage.tsx";
 
-// Заглушки для страниц (мы будем наполнять их по мере выбора)
-// const TablesPage = () => <h1 className="text-3xl font-bold text-gray-800">Зал и столы</h1>;
-// const OrdersPage = () => <h1 className="text-3xl font-bold text-gray-800">Заказы</h1>;
-const KitchenPage = () => <h1 className="text-3xl font-bold text-gray-800">Кухня / Бар</h1>;
 import MenuPage from './pages/MenuPage';
+import KitchenPage from './pages/KitchenPage';
 const UsersPage = () => <h1 className="text-3xl font-bold text-gray-800">Сотрудники</h1>;
 const AnalyticsPage = () => <h1 className="text-3xl font-bold text-gray-800">Аналитика</h1>;
 const SettingsPage = () => <h1 className="text-3xl font-bold text-gray-800">Настройки</h1>;

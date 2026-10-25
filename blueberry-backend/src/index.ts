@@ -23,6 +23,7 @@ import zoneRoutes from './routes/zoneRoutes.js';
 import tableRoutes from './routes/tableRoutes.js';
 import hookahFlavorRoutes from './routes/hookahFlavorRoutes.js';
 import hookahOrderRoutes from './routes/hookahOrderRoutes.js';
+import kdsRoutes from './routes/kdsRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import incidentRoutes from './routes/incidentRoutes.js';
 import announcementRoutes from './routes/announcementRoutes.js';
@@ -133,6 +134,9 @@ app.use('/api/tables', authenticateToken, tableRoutes);
 // Кальяны
 app.use('/api/hookah/flavors', authenticateToken, hookahFlavorRoutes);
 app.use('/api/hookah/orders', authenticateToken, hookahOrderRoutes);
+
+// KDS: экран «Кухня / Бар» (доска статусов позиций заказов)
+app.use('/api/kds', authenticateToken, kdsRoutes);
 
 // Постоянники
 app.use('/api/customers', authenticateToken, customerRoutes);
