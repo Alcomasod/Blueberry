@@ -148,34 +148,45 @@ app.use('/api/incidents', authenticateToken, incidentRoutes);
 app.use('/api/announcements', authenticateToken, announcementRoutes);
 app.use('/api/announcements/', authenticateToken, announcementRoutes);
 
-// 404 для неизвестных путей + централизованная обработка ошибок
-app.use(notFoundHandler);
-app.use(errorHandler);
-
 // ==========================================
 // СТАТИКА ФРОНТЕНДА (единый контейнер)
 // ==========================================
-// Если рядом с dist бэкенда лежит собранный фронтенд (public/frontend —
-// копируется в Dockerfile), Express раздаёт его сам. Запросы идут на тот же
-// порт, поэтому CORS не участвует, а VITE_API_URL = '/api' даёт относительные
-// пути — приложение доступно по любому IP/домену из зала без пересборки.
+// ВАЖНО: статика и SPA-fallback подключаются ДО notFoundHandler/errorHandler,
+// иначе перехватчик '*' никогда не срабатывает и браузер получает JSON 404.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendDist = path.join(__dirname, 'public', 'frontend');
+const frontendIndex = path.join(frontendDist, 'index.html');
+const hasFrontend = fs.existsSync(frontendIndex);
 
-if (fs.existsSync(path.join(frontendDist, 'index.html'))) {
+if (hasFrontend) {
     app.use(express.static(frontendDist));
-
-    // SPA-fallback: все GET-запросы, не начинающиеся с /api, отдаём index.html,
-    // чтобы React Router корректно обрабатывал прямые ссылки (/tables, /orders/5).
-    app.get('*', (req: Request, res: Response) => {
-        if (req.path.startsWith('/api')) {
-            return res.status(404).json({ success: false, error: 'Not found' });
-        }
-        res.sendFile(path.join(frontendDist, 'index.html'));
-    });
-
     console.log('🫐 Frontend static files served from', frontendDist);
+} else {
+    console.warn('⚠️ Frontend build not found at', frontendDist, '— serving API only');
 }
+
+// Системный корневой маршрут: отдаём SPA-страницу логина, если фронт собран;
+// иначе — заглушку API (актуально для отдельного запуска бэкенда в dev-режиме).
+app.get('/', (req: Request, res: Response) => {
+    if (hasFrontend) {
+        return res.sendFile(frontendIndex);
+    }
+    res.json({ message: 'Blueberry CRM API is running 🫐' });
+});
+
+// 404 для неизвестных api-путей
+// app.use('/api', notFoundHandler);
+
+// SPA-fallback: все прочие GET-запросы отдаём index.html,
+// чтобы React Router корректно обрабатывал прямые ссылки (/tables, /orders/5).
+if (hasFrontend) {
+    app.get('*', (req: Request, res: Response) => {
+        res.sendFile(frontendIndex);
+    });
+}
+
+// Централизованная обработка ошибок (всегда последней)
+// app.use(errorHandler);
 
 const startServer = async () => {
     try {
