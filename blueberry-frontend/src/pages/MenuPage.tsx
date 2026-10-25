@@ -375,23 +375,23 @@ export default function MenuPage() {
                     <ul className="divide-y divide-gray-50">
                         {list.map(({ item }) => (
                             <li key={item.id} className={`px-4 py-3 flex items-start gap-3 ${!itemAvailable(item) ? 'opacity-50' : ''}`}>
-                                <div className="flex-1 min-w-0">
-                                    <button
-                                        type="button"
-                                        onClick={() => setDetailItem({ item, categoryName: cat.name })}
-                                        className="font-medium text-gray-800 truncate hover:text-blueberry-600 hover:underline text-left"
-                                        title="Открыть карточку блюда"
-                                    >
+                                <button
+                                    type="button"
+                                    onClick={() => setDetailItem({ item, categoryName: cat.name })}
+                                    className="flex-1 min-w-0 text-left rounded-lg -mx-2 px-2 py-1 -my-1 hover:bg-blueberry-50 transition-colors cursor-pointer group/item"
+                                    title="Открыть карточку блюда"
+                                >
+                                    <span className="block font-medium text-gray-800 truncate group-hover/item:text-blueberry-700">
                                         {item.name}
-                                        {!itemAvailable(item) && <span className="ml-2 text-xs text-gray-400">(скрыто)</span>}
-                                    </button>
+                                        {!itemAvailable(item) && <span className="ml-2 text-xs text-gray-400 font-normal">(скрыто)</span>}
+                                    </span>
                                     {item.description && <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{item.description}</p>}
                                     {item.composition && (
                                         <p className="text-xs text-gray-400 mt-0.5">
                                             <span className="font-medium text-gray-500">Состав:</span> {item.composition}
                                         </p>
                                     )}
-                                </div>
+                                </button>
                                 <span className="font-semibold text-gray-800 whitespace-nowrap">{Number(item.price).toFixed(0)} ₽</span>
                                 {canManage && (
                                     <div className="flex gap-1 shrink-0">
