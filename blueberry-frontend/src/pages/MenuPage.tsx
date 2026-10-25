@@ -107,7 +107,8 @@ export default function MenuPage() {
     }, [showInactive]);
 
     const { rows, categories } = flattenTree(tree);
-    const categoryList = Array.from(categories.values());
+    // Категории сортируем по sort_order — порядок «Кухня → Бар → …» из БД
+    const categoryList = Array.from(categories.values()).sort((a, b) => a.sort_order - b.sort_order);
 
     const filteredRows = rows.filter(({ item }) => {
         if (!search.trim()) return true;
@@ -119,9 +120,16 @@ export default function MenuPage() {
         );
     });
 
-    const grouped = categoryList
+    let grouped = categoryList
         .map((cat) => ({ cat, list: filteredRows.filter((r) => r.categoryId === cat.id) }))
         .filter((g) => g.list.length > 0);
+
+    // Не-администраторы видят только доступные позиции (скрытые не показываются)
+    if (!canManage) {
+        grouped = grouped
+            .map((g) => ({ ...g, list: g.list.filter((r) => itemAvailable(r.item)) }))
+            .filter((g) => g.list.length > 0);
+    }
 
     // ===== Позиции =====
     const openCreateItem = () => {
