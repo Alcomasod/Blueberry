@@ -82,7 +82,8 @@ export async function createMenuItem(
     imageUrl?: string,
     isForGuests: boolean = true,
     sortOrder: number = 0,
-    composition?: string
+    composition?: string,
+    weight?: string
 ) {
     const client = await pool.connect();
     try {
@@ -91,10 +92,10 @@ export async function createMenuItem(
         // Создаем позицию меню
         const itemResult = await client.query(`
             INSERT INTO menu_items 
-            (category_id, name, description, composition, image_url, is_for_guests, sort_order, is_available)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+            (category_id, name, description, composition, image_url, is_for_guests, sort_order, is_available, weight)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
             RETURNING *
-        `, [categoryId, name, description || null, composition || null, imageUrl || null, isForGuests, sortOrder]);
+        `, [categoryId, name, description || null, composition || null, imageUrl || null, isForGuests, sortOrder, weight || null]);
 
         const menuItem = itemResult.rows[0];
 
@@ -123,7 +124,8 @@ export async function updateMenuItem(
     isForGuests?: boolean,
     isAvailable?: boolean,
     sortOrder?: number,
-    composition?: string
+    composition?: string,
+    weight?: string
 ) {
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -144,6 +146,10 @@ export async function updateMenuItem(
     if (composition !== undefined) {
         updates.push(`composition = $${paramIndex++}`);
         values.push(composition);
+    }
+    if (weight !== undefined) {
+        updates.push(`weight = $${paramIndex++}`);
+        values.push(weight);
     }
     if (imageUrl !== undefined) {
         updates.push(`image_url = $${paramIndex++}`);

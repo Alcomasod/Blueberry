@@ -64,9 +64,13 @@ export async function initDatabase() {
         is_available BOOLEAN DEFAULT TRUE,
         is_for_guests BOOLEAN DEFAULT TRUE,
         sort_order INT NOT NULL DEFAULT 0,
+        weight VARCHAR(50),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Авто-миграция: поле веса для старых БД, созданных до добавления weight
+      ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS weight VARCHAR(50);
 
       -- 6. История цен
       CREATE TABLE IF NOT EXISTS menu_item_prices (

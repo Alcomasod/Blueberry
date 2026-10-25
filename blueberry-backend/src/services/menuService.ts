@@ -7,6 +7,7 @@ export interface MenuItem {
     is_for_guests: boolean;
     composition?: string | null;
     description?: string | null;
+    weight?: string | null;
     category_id?: number;
     is_active?: boolean;
 }
@@ -102,7 +103,7 @@ export async function getMenuTree(includeInactive = false): Promise<Category[]> 
             {
                 sql: buildItemSql({
                     avail: availWhere,
-                    extra: `m.description, m.composition, ${availSelect}m.is_for_guests, m.sort_order,`,
+                    extra: `m.description, m.composition, m.weight, ${availSelect}m.is_for_guests, m.sort_order,`,
                     orderBy: 'ORDER BY m.sort_order ASC',
                 }),
                 normalize: (r: any) => ({ is_active: true, ...r }),
@@ -110,10 +111,18 @@ export async function getMenuTree(includeInactive = false): Promise<Category[]> 
             {
                 sql: buildItemSql({
                     avail: availWhere,
+                    extra: `m.description, m.composition, ${availSelect}m.is_for_guests, m.sort_order,`,
+                    orderBy: 'ORDER BY m.sort_order ASC',
+                }),
+                normalize: (r: any) => ({ weight: null, is_active: true, ...r }),
+            },
+            {
+                sql: buildItemSql({
+                    avail: availWhere,
                     extra: `m.description, ${availSelect}m.is_for_guests, m.sort_order,`,
                     orderBy: 'ORDER BY m.sort_order ASC',
                 }),
-                normalize: (r: any) => ({ composition: null, is_active: true, ...r }),
+                normalize: (r: any) => ({ composition: null, weight: null, is_active: true, ...r }),
             },
             {
                 sql: buildItemSql({
@@ -124,6 +133,7 @@ export async function getMenuTree(includeInactive = false): Promise<Category[]> 
                 normalize: (r: any) => ({
                     description: null,
                     composition: null,
+                    weight: null,
                     is_for_guests: true,
                     is_active: true,
                     sort_order: 0,
@@ -199,6 +209,7 @@ export async function getMenuTree(includeInactive = false): Promise<Category[]> 
             is_for_guests: item.is_for_guests,
             composition: item.composition ?? null,
             description: item.description ?? null,
+            weight: item.weight ?? null,
             category_id: item.category_id,
             is_active: item.is_active,
         });

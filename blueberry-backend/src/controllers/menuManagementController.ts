@@ -74,7 +74,7 @@ export async function handleDeleteCategory(req: Request, res: Response) {
 
 export async function handleCreateMenuItem(req: Request, res: Response) {
     const userId = req.user?.id;
-    const { category_id, name, price, description, image_url, is_for_guests = true, sort_order = 0, composition } = req.body;
+    const { category_id, name, price, description, image_url, is_for_guests = true, sort_order = 0, composition, weight } = req.body;
 
     if (!category_id || !name || price === undefined) {
         return res.status(400).json({
@@ -92,7 +92,8 @@ export async function handleCreateMenuItem(req: Request, res: Response) {
             image_url,
             is_for_guests,
             sort_order,
-            composition
+            composition,
+            weight
         );
         res.status(201).json({ success: true, data: menuItem });
     } catch (error) {
@@ -103,7 +104,7 @@ export async function handleCreateMenuItem(req: Request, res: Response) {
 
 export async function handleUpdateMenuItem(req: Request, res: Response) {
     const { id } = req.params;
-    const { category_id, name, description, image_url, is_for_guests, is_available, sort_order, composition } = req.body;
+    const { category_id, name, description, image_url, is_for_guests, is_available, sort_order, composition, weight } = req.body;
 
     try {
         const menuItem = await updateMenuItem(
@@ -115,7 +116,8 @@ export async function handleUpdateMenuItem(req: Request, res: Response) {
             is_for_guests,
             is_available,
             sort_order,
-            composition
+            composition,
+            weight
         );
 
         if (!menuItem) {

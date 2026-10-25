@@ -11,6 +11,7 @@ interface MenuItem {
     is_for_guests?: boolean;
     composition?: string | null;
     description?: string | null;
+    weight?: string | null;
     category_id?: number;
     /** Бэкенд отдаёт поле как `is_active` (GET /menu) и как `is_available` (ответы управления) — принимаем оба */
     is_active?: boolean;
@@ -62,7 +63,7 @@ function getRoleFallback(user: { role?: string } | null | undefined): string | n
     }
 }
 
-const EMPTY_ITEM_FORM = { name: '', price: '', category_id: '', description: '', composition: '' };
+const EMPTY_ITEM_FORM = { name: '', price: '', category_id: '', description: '', composition: '', weight: '' };
 const EMPTY_CATEGORY_FORM = { name: '', sort_order: '0' };
 
 // Рекурсивно собираем плоский список позиций и карту категорий
@@ -99,6 +100,9 @@ export default function MenuPage() {
     const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
     const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
     const [saving, setSaving] = useState(false);
+
+    // Модалка просмотра позиции (доступна всем ролям, включая официантов)
+    const [detailItem, setDetailItem] = useState<{ item: MenuItem; categoryName: string } | null>(null);
 
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState<CategoryNode | null>(null);
@@ -180,6 +184,7 @@ export default function MenuPage() {
             category_id: String(item.category_id ?? ''),
             description: item.description ?? '',
             composition: item.composition ?? '',
+            weight: item.weight ?? '',
         });
         setIsItemModalOpen(true);
     };
@@ -206,6 +211,7 @@ export default function MenuPage() {
                 price: parseFloat(itemForm.price),
                 description: itemForm.description.trim() || undefined,
                 composition: itemForm.composition.trim() || undefined,
+                weight: itemForm.weight.trim() || undefined,
             };
             if (editingItem) {
                 await api.patch(`/menu-management/items/${editingItem.id}`, {
@@ -213,6 +219,7 @@ export default function MenuPage() {
                     name: payload.name,
                     description: payload.description,
                     composition: payload.composition,
+                    weight: payload.weight,
                 });
                 // Цена меняется отдельным эндпоинтом (сохраняется история цен)
                 if (Number(editingItem.price) !== payload.price) {
@@ -369,10 +376,15 @@ export default function MenuPage() {
                         {list.map(({ item }) => (
                             <li key={item.id} className={`px-4 py-3 flex items-start gap-3 ${!itemAvailable(item) ? 'opacity-50' : ''}`}>
                                 <div className="flex-1 min-w-0">
-                                    <p className="font-medium text-gray-800 truncate">
+                                    <button
+                                        type="button"
+                                        onClick={() => setDetailItem({ item, categoryName: cat.name })}
+                                        className="font-medium text-gray-800 truncate hover:text-blueberry-600 hover:underline text-left"
+                                        title="Открыть карточку блюда"
+                                    >
                                         {item.name}
                                         {!itemAvailable(item) && <span className="ml-2 text-xs text-gray-400">(скрыто)</span>}
-                                    </p>
+                                    </button>
                                     {item.description && <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{item.description}</p>}
                                     {item.composition && (
                                         <p className="text-xs text-gray-400 mt-0.5">
@@ -439,6 +451,10 @@ export default function MenuPage() {
                             <label className="block text-sm font-medium text-gray-700 mb-1">Состав (подсказка для персонала)</label>
                             <textarea rows={2} value={itemForm.composition} onChange={(e) => setItemForm({ ...itemForm, composition: e.target.value })} placeholder="Например: говядина, лук, соус ткемали…" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Вес / порция</label>
+                            <input value={itemForm.weight} onChange={(e) => setItemForm({ ...itemForm, weight: e.target.value })} placeholder="Например: 250 г" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                        </div>
                         <div className="flex justify-end gap-2 pt-2">
                             <button type="button" onClick={() => setIsItemModalOpen(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Отмена</button>
                             <button type="submit" disabled={saving} className="px-4 py-2 text-sm bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 disabled:opacity-50 flex items-center gap-2">
@@ -446,6 +462,47 @@ export default function MenuPage() {
                             </button>
                         </div>
                     </form>
+                </Modal>
+            )}
+
+            {/* Модалка просмотра позиции — доступна всем ролям (официанты знакомятся с меню) */}
+            {detailItem && (
+                <Modal isOpen onClose={() => setDetailItem(null)} title="Карточка блюда">
+                    <div className="space-y-3">
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-800">{detailItem.item.name}</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">{detailItem.categoryName}</p>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-2xl font-bold text-blueberry-700">{Number(detailItem.item.price).toFixed(2)} ₽</span>
+                            {detailItem.item.weight && <span className="text-sm text-gray-500">/ {detailItem.item.weight}</span>}
+                        </div>
+                        {detailItem.item.description && (
+                            <div className="bg-gray-50 rounded-lg p-3">
+                                <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Описание</p>
+                                <p className="text-sm text-gray-700 whitespace-pre-line">{detailItem.item.description}</p>
+                            </div>
+                        )}
+                        <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Состав</p>
+                            <p className="text-sm text-gray-700 whitespace-pre-line">{detailItem.item.composition?.trim() || 'Не указан — уточните у администратора'}</p>
+                        </div>
+                        {!itemAvailable(detailItem.item) && (
+                            <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">Позиция скрыта из меню. Позиция недоступна для заказа.</p>
+                        )}
+                        {canManage ? (
+                            <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                    onClick={() => { const it = detailItem.item; setDetailItem(null); openEditItem(it); }}
+                                    className="px-4 py-2 text-sm bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 flex items-center gap-1"
+                                >
+                                    <Pencil size={15} /> Редактировать
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-gray-400">Данные предоставлены для ознакомления персонала.</p>
+                        )}
+                    </div>
                 </Modal>
             )}
 
