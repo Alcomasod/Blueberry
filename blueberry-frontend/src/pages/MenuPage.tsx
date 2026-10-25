@@ -12,7 +12,9 @@ interface MenuItem {
     composition?: string | null;
     description?: string | null;
     category_id?: number;
+    /** Бэкенд отдаёт поле как `is_active` (GET /menu) и как `is_available` (ответы управления) — принимаем оба */
     is_active?: boolean;
+    is_available?: boolean;
 }
 
 interface CategoryNode {
@@ -30,6 +32,9 @@ interface FlatRow {
     categoryId: number;
 }
 
+/** Доступность позиции: бэкенд отдаёт то is_active, то is_available в зависимости от эндпоинта */
+const itemAvailable = (item: MenuItem): boolean => (item.is_active ?? item.is_available ?? true) !== false;
+
 const ADMIN_ROLES = ['sys_admin', 'director', 'admin'];
 
 const EMPTY_ITEM_FORM = { name: '', price: '', category_id: '', description: '', composition: '' };
@@ -40,13 +45,14 @@ function flattenTree(nodes: CategoryNode[]): { rows: FlatRow[]; categories: Map<
     const rows: FlatRow[] = [];
     const categories = new Map<number, CategoryNode>();
 
-    const walk = (list: CategoryNode[]) => {
+    const walk = (list: CategoryNode[], pathName?: string) => {
         for (const cat of list || []) {
             categories.set(cat.id, cat);
+            const displayName = pathName ? `${pathName} · ${cat.name}` : cat.name;
             for (const item of cat.items || []) {
-                rows.push({ item, categoryName: cat.name, categoryId: cat.id });
+                rows.push({ item, categoryName: displayName, categoryId: cat.id });
             }
-            if (cat.children?.length) walk(cat.children);
+            if (cat.children?.length) walk(cat.children, displayName);
         }
     };
     walk(nodes || []);
@@ -136,13 +142,24 @@ export default function MenuPage() {
         setIsItemModalOpen(true);
     };
 
+    // Позиции с битой/сервисной category_id (например, из «Без категории»)
+    // при сохранении нельзя отправить — бэкенд отклонит такой запрос.
+    const currentCategoryId = editingItem ? String(editingItem.category_id ?? '') : '';
+    const categoryOptions = categoryList.filter((c) => c.id > 0);
+    const categorySelectValue =
+        itemForm.category_id && categoryOptions.some((c) => c.id === Number(itemForm.category_id))
+            ? itemForm.category_id
+            : currentCategoryId && !categoryOptions.some((c) => c.id === Number(currentCategoryId))
+                ? currentCategoryId
+                : '';
+
     const handleSaveItem = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!itemForm.name.trim() || !itemForm.price || !itemForm.category_id) return;
+        if (!itemForm.name.trim() || !itemForm.price || !categorySelectValue) return;
         setSaving(true);
         try {
             const payload = {
-                category_id: Number(itemForm.category_id),
+                category_id: Number(categorySelectValue),
                 name: itemForm.name.trim(),
                 price: parseFloat(itemForm.price),
                 description: itemForm.description.trim() || undefined,
@@ -173,7 +190,7 @@ export default function MenuPage() {
     };
 
     const toggleAvailability = async (item: MenuItem) => {
-        const makeAvailable = !item.is_active;
+        const makeAvailable = !itemAvailable(item);
         if (!confirm(`"${item.name}": ${makeAvailable ? 'вернуть в меню?' : 'скрыть из меню?'}`)) return;
         try {
             await api.patch(`/menu-management/items/${item.id}`, { is_available: makeAvailable });
@@ -308,11 +325,11 @@ export default function MenuPage() {
                     </header>
                     <ul className="divide-y divide-gray-50">
                         {list.map(({ item }) => (
-                            <li key={item.id} className={`px-4 py-3 flex items-start gap-3 ${!item.is_active ? 'opacity-50' : ''}`}>
+                            <li key={item.id} className={`px-4 py-3 flex items-start gap-3 ${!itemAvailable(item) ? 'opacity-50' : ''}`}>
                                 <div className="flex-1 min-w-0">
                                     <p className="font-medium text-gray-800 truncate">
                                         {item.name}
-                                        {!item.is_active && <span className="ml-2 text-xs text-gray-400">(скрыто)</span>}
+                                        {!itemAvailable(item) && <span className="ml-2 text-xs text-gray-400">(скрыто)</span>}
                                     </p>
                                     {item.description && <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{item.description}</p>}
                                     {item.composition && (
@@ -330,9 +347,9 @@ export default function MenuPage() {
                                         <button
                                             onClick={() => toggleAvailability(item)}
                                             className="p-1.5 text-gray-500 hover:text-amber-600"
-                                            title={item.is_active ? 'Скрыть из меню' : 'Вернуть в меню'}
+                                            title={itemAvailable(item) ? 'Скрыть из меню' : 'Вернуть в меню'}
                                         >
-                                            {item.is_active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                                            {itemAvailable(item) ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                                         </button>
                                         <button onClick={() => deleteItem(item)} className="p-1.5 text-gray-500 hover:text-red-600" title="Удалить">
                                             <Trash2 size={15} />
@@ -360,11 +377,15 @@ export default function MenuPage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Категория *</label>
-                                <select required value={itemForm.category_id} onChange={(e) => setItemForm({ ...itemForm, category_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                                <select required value={categorySelectValue} onChange={(e) => setItemForm({ ...itemForm, category_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
                                     <option value="">— Выберите —</option>
-                                    {categoryList.map((c) => (
+                                    {categoryOptions.map((c) => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
                                     ))}
+                                    {/* Позиция «сирота» с битой category_id — показываем текущее значение, чтобы select не сбрасывался */}
+                                    {currentCategoryId && !categoryOptions.some((c) => c.id === Number(currentCategoryId)) && (
+                                        <option value={currentCategoryId}>Без категории</option>
+                                    )}
                                 </select>
                             </div>
                         </div>

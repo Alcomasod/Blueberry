@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getMenuTree } from '../services/menuService.js';
+import { hasPermission, PERMISSIONS, Role } from '../config/permissions.js';
 
 export async function getMenu(req: Request, res: Response) {
     try {
@@ -7,7 +8,10 @@ export async function getMenu(req: Request, res: Response) {
         // Скрытые (недоступные) позиции в него не входят — полный список с флагом
         // is_available доступен администраторам через ?includeInactive=true.
         const includeInactive = req.query.includeInactive === 'true';
-        const menuTree = await getMenuTree(includeInactive);
+        // Скрытые позиции может запрашивать только роль с правом управления меню;
+        // для остальных это всегда обычный гостевой вид.
+        const canManageMenu = hasPermission(req.user?.role as Role, PERMISSIONS.MANAGE_MENU);
+        const menuTree = await getMenuTree(includeInactive && canManageMenu);
         res.json({ success: true, data: menuTree });
     } catch (error) {
         console.error('Error fetching menu:', error);
