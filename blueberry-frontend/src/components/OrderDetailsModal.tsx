@@ -6,10 +6,10 @@ import { formatAmount } from '../lib/format';
 import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
 import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History, Check } from 'lucide-react';
 import Modal from './Modal';
-import { useAuthStore } from '../store/authStore';
 
 interface OrderDetailsModalProps {
     orderId: number;
+    isOpen?: boolean;
     onClose: () => void;
 }
 
@@ -17,8 +17,8 @@ interface OrderItem {
     id: number;
     item_name: string;
     quantity: number;
-    price_at_sale: number;
-    line_total: number;
+    price_at_sale: number | string;
+    line_total: number | string;
     comment?: string | null;
 }
 
@@ -35,15 +35,14 @@ interface Order {
     table_number: string;
     zone_name: string;
     status: string;
-    total_amount: number;
+    total_amount: number | string;
     comment?: string | null;
     items: OrderItem[];
 }
 
-export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModalProps) {
-    const user = useAuthStore((s) => s.user);
+export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: OrderDetailsModalProps) {
     const [order, setOrder] = useState<Order | null>(null);
-    const [menuItems, setMenuItems] = useState<FlatMenuItem[]>([]);
+    const [catalog, setCatalog] = useState<CatalogCategory[]>([]);
     const [search, setSearch] = useState('');
     const [activeCategory, setActiveCategory] = useState<string>('all');
     const [loading, setLoading] = useState(true);
@@ -55,40 +54,56 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
     const [saving, setSaving] = useState(false);
 
     const fetchData = async () => {
-            try {
-                const [ordersRes, menuRes] = await Promise.all([
-                    api.get(`/orders/${orderId}`),
-                    api.get('/menu'),
-                ]);
-                const o = ordersRes.data.data;
-                setOrder(o);
-                setMenuItems(menuRes.data.data.filter((m: FlatMenuItem) => m.is_active));
-                // синхронизируем поле комментария, если пользователь ещё не редактировал его
-                setOrderComment((prev) => (commentDirty ? prev : o.comment ?? ''));
-            } catch (err) {
-                alert(getApiErrorMessage(err, 'Не удалось загрузить заказ'));
-            } finally {
+        try {
+            const [ordersRes, menuRes] = await Promise.all([
+                api.get(`/orders/${orderId}`),
+                api.get('/menu'),
+            ]);
+            const o = ordersRes.data.data as Order;
+            setOrder(o);
+            // buildCatalog принимает сырое дерево категорий из ответа /api/menu
+            setCatalog(buildCatalog(menuRes.data.data));
+            // синхронизируем поле комментария, если пользователь ещё не редактировал его
+            setOrderComment((prev) => (commentDirty ? prev : o.comment ?? ''));
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Не удалось загрузить заказ'));
+        } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchData();
+        if (isOpen) {
+            fetchData();
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orderId]);
+    }, [orderId, isOpen]);
 
-    const catalog: CatalogCategory[] = useMemo(
-        () => buildCatalog(menuItems, search),
-        [menuItems, search],
-    );
+    const filteredCatalog = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return catalog;
+        return catalog
+            .map((cat) => ({ ...cat, items: cat.items.filter((mi) => mi.name.toLowerCase().includes(q)) }))
+            .filter((cat) => cat.items.length > 0);
+    }, [catalog, search]);
 
     const visibleCategories = useMemo(
         () =>
             activeCategory === 'all'
-                ? catalog
-                : catalog.filter((c) => c.category === activeCategory),
-        [catalog, activeCategory],
+                ? filteredCatalog
+                : filteredCatalog.filter((c) => c.key === activeCategory),
+        [filteredCatalog, activeCategory],
     );
+
+    const handleRemoveItem = async (itemId: number) => {
+        if (!confirm('Удалить позицию?')) return;
+        try {
+            await api.delete(`/orders/${orderId}/items/${itemId}`);
+            await fetchData();
+        } catch (err) {
+            alert(getApiErrorMessage(err, 'Ошибка удаления позиции'));
+        }
+    };
 
     const handleAddItem = async (item: FlatMenuItem) => {
         try {
@@ -106,7 +121,10 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
         const it = order?.items.find((i) => i.id === itemId);
         if (!it) return;
         const newQty = it.quantity + delta;
-        if (newQty <= 0) return handleRemoveItem(itemId);
+        if (newQty <= 0) {
+            await handleRemoveItem(itemId);
+            return;
+        }
         try {
             await api.patch(`/orders/${orderId}/items/${itemId}`, { quantity: newQty });
             await fetchData();
@@ -115,18 +133,9 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
         }
     };
 
-    const handleRemoveItem = async (itemId: number) => {
-        if (!confirm('Удалить позицию?')) return;
-        try {
-            await api.delete(`/orders/${orderId}/items/${itemId}`);
-            await fetchData();
-        } catch (err) {
-            alert(getApiErrorMessage(err, 'Ошибка удаления позиции'));
-        }
-    };
-
     const handleSaveComment = async () => {
         if (!commentDirty) return true;
+        setSaving(true);
         try {
             await api.patch(`/orders/${orderId}/comment`, { comment: orderComment });
             setCommentDirty(false);
@@ -134,6 +143,8 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
         } catch (err) {
             alert(getApiErrorMessage(err, 'Не удалось сохранить комментарий'));
             return false;
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -152,7 +163,7 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
         if (history.length === 0) {
             try {
                 const res = await api.get(`/orders/${orderId}/history`);
-                setHistory(res.data.data);
+                setHistory(res.data.data as OrderHistoryEntry[]);
             } catch (err) {
                 alert(getApiErrorMessage(err, 'История недоступна'));
             }
@@ -165,7 +176,12 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
     );
 
     return (
-        <Modal title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'} onClose={onClose}>
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            size="lg"
+            title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'}
+        >
             {loading ? (
                 <div className="flex justify-center py-10">
                     <Loader2 className="animate-spin text-blueberry-600" size={32} />
@@ -186,7 +202,7 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
                                         <button onClick={() => handleQtyChange(it.id, -1)} className="p-1 rounded hover:bg-gray-100"><Minus size={14} /></button>
                                         <span className="w-8 text-center text-sm font-medium">{it.quantity}</span>
                                         <button onClick={() => handleQtyChange(it.id, 1)} className="p-1 rounded hover:bg-gray-100"><Plus size={14} /></button>
-                                        <span className="w-20 text-right text-sm">{formatAmount(Number(it.line_total))}</span>
+                                        <span className="w-20 text-right text-sm">{formatAmount(Number(it.line_total))} р</span>
                                         <button onClick={() => handleRemoveItem(it.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
                                     </li>
                                 ))}
@@ -199,7 +215,7 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
                     {/* Итого */}
                     <div className="rounded-md bg-blueberry-50 px-3 py-2 flex justify-between font-bold text-blueberry-900">
                         <span>Итого</span>
-                        <span>{formatAmount(total)}</span>
+                        <span>{formatAmount(total)} р</span>
                     </div>
 
                     {/* Комментарий к заказу */}
@@ -233,25 +249,26 @@ export default function OrderDetailsModal({ orderId, onClose }: OrderDetailsModa
                                 >Все</button>
                                 {catalog.map((c) => (
                                     <button
-                                        key={c.category}
-                                        onClick={() => setActiveCategory(c.category)}
-                                        className={`px-2 py-1 rounded-full text-xs ${activeCategory === c.category ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                                    >{c.category}</button>
+                                        key={c.key}
+                                        onClick={() => setActiveCategory(c.key)}
+                                        className={`px-2 py-1 rounded-full text-xs ${activeCategory === c.key ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                                    >{c.name}</button>
                                 ))}
                             </div>
                             <div className="max-h-56 overflow-y-auto space-y-3">
                                 {visibleCategories.map((cat) => (
-                                    <div key={cat.category}>
-                                        <p className="text-xs font-semibold text-gray-500 mb-1">{cat.category}</p>
+                                    <div key={cat.key}>
+                                        <p className="text-xs font-semibold text-gray-500 mb-1">{cat.name}</p>
                                         <div className="grid grid-cols-2 gap-1">
                                             {cat.items.map((mi) => (
                                                 <button
                                                     key={mi.id}
                                                     onClick={() => handleAddItem(mi)}
+                                                    title={mi.composition ? `Состав: ${mi.composition}` : undefined}
                                                     className="text-left px-2 py-1.5 rounded hover:bg-blueberry-50 text-sm flex justify-between gap-2"
                                                 >
                                                     <span className="truncate">{mi.name}</span>
-                                                    <span className="text-gray-500 shrink-0">{formatAmount(mi.price)}</span>
+                                                    <span className="text-gray-500 shrink-0">{formatAmount(mi.price)} р</span>
                                                 </button>
                                             ))}
                                         </div>
