@@ -262,6 +262,20 @@ export async function initDatabase() {
         await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT`);
         console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment).');
 
+        // Страховка от NULL-флагов у старых seed-строк
+        await pool.query(`UPDATE categories SET is_active = TRUE WHERE is_active IS NULL`);
+        await pool.query(`UPDATE menu_items SET is_available = TRUE WHERE is_available IS NULL`);
+        // Позиции без действующей цены получат запись с 0, чтобы не теряться из меню
+                await pool.query(`
+            INSERT INTO menu_item_prices (menu_item_id, price, valid_from)
+            SELECT m.id, 0, NOW()
+            FROM menu_items m
+            WHERE NOT EXISTS (
+                SELECT 1 FROM menu_item_prices p
+                WHERE p.menu_item_id = m.id AND p.valid_to IS NULL
+            )
+        `);
+
         await seedDatabase();
     } catch (error) {
         console.error('❌ Blueberry: Критическая ошибка инициализации БД:', error);
