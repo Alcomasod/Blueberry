@@ -35,7 +35,32 @@ interface FlatRow {
 /** Доступность позиции: бэкенд отдаёт то is_active, то is_available в зависимости от эндпоинта */
 const itemAvailable = (item: MenuItem): boolean => (item.is_active ?? item.is_available ?? true) !== false;
 
-const ADMIN_ROLES = ['sys_admin', 'director', 'admin'];
+/**
+ * Право управлять меню — единый источник истины с бэкендом:
+ * роль есть в списке ролей с пермишеном MANAGE_MENU (admin, director, sys_admin).
+ */
+const MENU_MANAGE_ROLES = ['sys_admin', 'director', 'admin'];
+
+/**
+ * Fallback-определение администратора, если поле `role` не пришло в токене/localStorage
+ * (например, пользователь залогинен старой версией фронтенда или данные повреждены).
+ * Пытаемся извлечь роль из JWT без проверки подписи — только для UI-границ доступа,
+ * реальную безопасность по-прежнему обеспечивает бэкенд.
+ */
+function getRoleFallback(user: { role?: string } | null | undefined): string | null {
+    if (user?.role) return user.role;
+    try {
+        const token: string | null = useAuthStore.getState().token;
+        if (!token) return null;
+        const payloadB64 = token.split('.')[1];
+        if (!payloadB64) return null;
+        const json = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
+        const parsed = JSON.parse(json) as { role?: string };
+        return parsed.role ?? null;
+    } catch {
+        return null;
+    }
+}
 
 const EMPTY_ITEM_FORM = { name: '', price: '', category_id: '', description: '', composition: '' };
 const EMPTY_CATEGORY_FORM = { name: '', sort_order: '0' };
@@ -61,7 +86,8 @@ function flattenTree(nodes: CategoryNode[]): { rows: FlatRow[]; categories: Map<
 
 export default function MenuPage() {
     const user = useAuthStore((state) => state.user);
-    const canManage = !!user && ADMIN_ROLES.includes(user.role);
+    const effectiveRole = getRoleFallback(user);
+    const canManage = !!effectiveRole && MENU_MANAGE_ROLES.includes(effectiveRole);
 
     const [tree, setTree] = useState<CategoryNode[]>([]);
     const [loading, setLoading] = useState(true);
@@ -104,7 +130,15 @@ export default function MenuPage() {
     useEffect(() => {
         fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showInactive]);
+    }, [showInactive, canManage]);
+
+    // Если данные пришли пустые при успешно выполненном запросе — подсказка,
+    // где именно проблема (пустая БД vs отфильтрованные флагами позиции)
+    const emptyHint = tree.length === 0
+            ? canManage
+                ? 'Бэкенд вернул пустой список. Возможные причины: в таблицах `categories`/`menu_items` выставлены флаги is_active/is_available = FALSE, либо в БД действительно нет данных. Проверьте ответ GET /api/menu и логи бэкенда (строка "GET /api/menu: ...").'
+                : 'Меню пусто или все позиции скрыты флагами доступности. Обратитесь к администратору.'
+            : null;
 
     const { rows, categories } = flattenTree(tree);
     // Категории сортируем по sort_order — порядок «Кухня → Бар → …» из БД
@@ -312,7 +346,7 @@ export default function MenuPage() {
 
             {grouped.length === 0 && (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400 text-sm">
-                    Меню пустое. {canManage ? 'Добавьте категории и позиции.' : 'Попросите администратора заполнить меню.'}
+                    {emptyHint ?? 'Меню пустое. ' + (canManage ? 'Добавьте категории и позиции.' : 'Попросите администратора заполнить меню.')}
                 </div>
             )}
 
