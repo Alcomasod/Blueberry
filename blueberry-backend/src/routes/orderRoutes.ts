@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
     handleCreateOrder,
     handlePayOrder,
+    handleCloseOrder,
     handleAddItem,
     handleRemoveItem,
     handleUpdateQuantity,
@@ -26,6 +27,9 @@ router.post('/', handleCreateOrder);
 
 // POST /api/orders/:id/pay - Оплатить заказ
 router.post('/:id/pay', handlePayOrder);
+
+// POST /api/orders/:id/close - Закрыть счёт напрямую (admin+, без смены)
+router.post('/:id/close', handleCloseOrder);
 
 // POST /api/orders/:id/items - Добавить позицию
 router.post('/:id/items', handleAddItem);

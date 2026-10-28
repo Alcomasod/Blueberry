@@ -157,6 +157,43 @@ export async function handlePayOrder(req: Request, res: Response) {
     }
 }
 
+// POST /api/orders/:id/close - Закрыть (оплатить) заказ напрямую из карточки стола.
+// Воспроизводит логику страницы «Заказы» (POST /orders/:id/pay): статус -> paid,
+// closed_at = NOW(), стол освобождается, начисляются баллы постояннику.
+// Отличие: не требует активной смены — закрытие счёта доступно admin+ (MANAGE_ALL_OPEN_ORDERS).
+export async function handleCloseOrder(req: Request, res: Response) {
+    const { id } = req.params;
+    const role = req.user?.role;
+
+    if (!canManageAnyOrder(role)) {
+        return res.status(403).json({
+            success: false,
+            error: 'Недостаточно прав для закрытия счёта'
+        });
+    }
+
+    try {
+        const order = await payOrder(parseInt(id, 10), 'cash', 0, 0, req.user?.id);
+
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                error: 'Заказ не найден или уже закрыт'
+            });
+        }
+
+        res.json({ success: true, data: order });
+    } catch (error) {
+        const msg = (error as Error).message || '';
+        console.error('Error closing order:', error);
+        // «Уже оплачен/не найден» service бросает как ошибку — отдаём корректный код
+        if (msg.includes('not found') || msg.includes('already paid')) {
+            return res.status(404).json({ success: false, error: 'Заказ не найден или уже закрыт' });
+        }
+        res.status(500).json({ success: false, error: 'Не удалось закрыть счёт' });
+    }
+}
+
 export async function handleAddItem(req: Request, res: Response) {
     const waiterId = req.user?.id;
     if (!waiterId) {
