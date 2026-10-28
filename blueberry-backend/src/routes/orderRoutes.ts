@@ -3,6 +3,7 @@ import {
     handleCreateOrder,
     handlePayOrder,
     handleCloseOrder,
+    handleUpdateOrder,
     handleAddItem,
     handleRemoveItem,
     handleUpdateQuantity,
@@ -30,6 +31,11 @@ router.post('/:id/pay', handlePayOrder);
 
 // POST /api/orders/:id/close - Закрыть счёт напрямую (admin+, без смены)
 router.post('/:id/close', handleCloseOrder);
+
+// PATCH /api/orders/:id - Обновить заказ (напр. { status: 'paid' } — оплата со страницы «Заказы»).
+// ВАЖНО: должен быть объявлен ДО router.get('/:id') не зависит (методы разные),
+// но сам роут ранее отсутствовал, из-за чего фронтенд получал 404 на PATCH /api/orders/:id.
+router.patch('/:id', handleUpdateOrder);
 
 // POST /api/orders/:id/items - Добавить позицию
 router.post('/:id/items', handleAddItem);

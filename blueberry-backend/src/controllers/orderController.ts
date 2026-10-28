@@ -13,6 +13,7 @@ import {
 } from '../services/orderService.js';
 import { getActiveShift } from '../services/shiftService.js';
 import { hasPermission, PERMISSIONS, Role } from '../config/permissions.js';
+import pool from '../config/db.js';
 
 // Пользователь с MANAGE_ALL_OPEN_ORDERS (admin+) может работать с заказами
 // независимо от собственной открытой смены.
@@ -155,6 +156,59 @@ export async function handlePayOrder(req: Request, res: Response) {
         console.error('Error paying order:', error);
         res.status(500).json({ success: false, error: 'Failed to pay order' });
     }
+}
+
+// PATCH /api/orders/:id - Обновление заказа.
+// Поддерживает { status: 'paid' } — этот вызов использует фронтенд страницы «Заказы»
+// (OrderDetailsModal → handlePayOrder). Ранее эндпоинт отсутствовал, из-за чего
+// оплата возвращала 404. Логику полностью воспроизводим через payOrder():
+// статус -> paid, closed_at = NOW(), начисление баллов, освобождение стола.
+export async function handleUpdateOrder(req: Request, res: Response) {
+    const { id } = req.params;
+    const { status } = req.body ?? {};
+
+    try {
+        if (status === 'paid') {
+            // Оплата/закрытие счёта — как на странице «Заказы» и «Зал и столы»
+            const order = await payOrder(parseInt(id, 10), 'cash', 0, 0, req.user?.id);
+            return res.json({ success: true, data: order });
+        }
+
+        if (status === 'cancelled') {
+            // Отмена открытого заказа (admin+), освобождаем стол
+            if (!canManageAnyOrder(req.user?.role)) {
+                return res.status(403).json({ success: false, error: 'Недостаточно прав для отмены заказа' });
+            }
+            const result = await poolQueryCancel(parseInt(id, 10));
+            if (!result) {
+                return res.status(404).json({ success: false, error: 'Заказ не найден или уже закрыт' });
+            }
+            return res.json({ success: true, data: result });
+        }
+
+        return res.status(400).json({ success: false, error: 'Неподдерживаемое поле обновления' });
+    } catch (error) {
+        const msg = (error as Error).message || '';
+        console.error('Error updating order:', error);
+        if (msg.includes('not found') || msg.includes('already paid')) {
+            return res.status(404).json({ success: false, error: 'Заказ не найден или уже закрыт' });
+        }
+        res.status(500).json({ success: false, error: 'Не удалось обновить заказ' });
+    }
+}
+
+// Вспомогательный запрос для отмены заказа (вынесен, чтобы не тянуть транзакцию в контроллер)
+async function poolQueryCancel(orderId: number) {
+    const upd = await pool.query(
+        `UPDATE orders SET status = 'cancelled', closed_at = NOW() WHERE id = $1 AND status = 'open' RETURNING *`,
+        [orderId],
+    );
+    if (upd.rows.length === 0) return null;
+    const order = upd.rows[0];
+    if (order.table_id) {
+        await pool.query(`UPDATE tables SET status = 'free' WHERE id = $1`, [order.table_id]);
+    }
+    return order;
 }
 
 // POST /api/orders/:id/close - Закрыть (оплатить) заказ напрямую из карточки стола.
