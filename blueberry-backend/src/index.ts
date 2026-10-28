@@ -116,6 +116,19 @@ app.use('/api/menu-management', authenticateToken, requirePermission(PERMISSIONS
 app.use('/api/shifts', authenticateToken, shiftRoutes);
 
 // Заказы
+const STARTUP_TS = Date.now();
+
+// Диагностика сборки: позволяет проверить, какой версии бэкенда отвечает контейнер.
+// Ожидаемый ответ после пересборки: 200 с build >= 2026-10-28a (close endpoint available: true)
+app.get('/api/_build-info', (_req: Request, res: Response) => {
+    res.json({
+        build: '2026-10-28a',
+        closeEndpointAvailable: true,
+        node: process.version,
+        startedAt: new Date(STARTUP_TS).toISOString(),
+    });
+});
+
 app.use('/api/orders', authenticateToken, orderRoutes);
 
 // Аналитика: только admin+
