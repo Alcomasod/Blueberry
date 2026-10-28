@@ -1,6 +1,5 @@
 import pool from '../config/db.js';
 import bcrypt from 'bcryptjs';
-import { ensureKdsSchema } from '../services/kdsService.js';
 
 export async function initDatabase() {
     console.log('🔄 Blueberry: Инициализация структуры базы данных...');
@@ -281,9 +280,6 @@ export async function initDatabase() {
             )
         `);
 
-        // KDS (экран «Кухня / Бар»): статусы позиций заказов + станция подачи
-        await ensureKdsSchema();
-        console.log('✅ Blueberry: Миграции KDS применены (order_items.item_status, preparing_at, menu_items.station).');
 
         await seedDatabase();
     } catch (error) {

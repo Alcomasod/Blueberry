@@ -10,7 +10,6 @@ import OrderDetailsPage from "./pages/OrderDetailsPage.tsx";
 import DashboardPage from "./pages/DashboardPage.tsx";
 
 import MenuPage from './pages/MenuPage';
-import KitchenPage from './pages/KitchenPage';
 const UsersPage = () => <h1 className="text-3xl font-bold text-gray-800">Сотрудники</h1>;
 const AnalyticsPage = () => <h1 className="text-3xl font-bold text-gray-800">Аналитика</h1>;
 const SettingsPage = () => <h1 className="text-3xl font-bold text-gray-800">Настройки</h1>;
@@ -30,7 +29,6 @@ function App() {
                         <Route path="/tables" element={<TablesPage />} />
                         <Route path="/orders" element={<OrdersPage />} />
                         <Route path="/orders/:id" element={<OrderDetailsPage />} />
-                        <Route path="/kitchen" element={<KitchenPage />} />
                         <Route path="/menu" element={<MenuPage />} />
                         <Route path="/users" element={<UsersPage />} />
                         <Route path="/analytics" element={<AnalyticsPage />} />
