@@ -3,7 +3,6 @@ import { useAuthStore } from '../store/authStore';
 import {
     LayoutDashboard,
     UtensilsCrossed,
-    ChefHat,
     BookOpen,
     Users,
     BarChart3,
@@ -25,7 +24,6 @@ const menuItems: MenuItem[] = [
     { label: 'Дашборд', path: '/dashboard', icon: <LayoutDashboard size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter', 'kitchen', 'hookah_master', 'hookah_bar'] },
     { label: 'Зал и столы', path: '/tables', icon: <UtensilsCrossed size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter'] },
     { label: 'Заказы', path: '/orders', icon: <BookOpen size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter'] },
-    { label: 'Кухня / Бар', path: '/kitchen', icon: <ChefHat size={20} />, roles: ['sys_admin', 'director', 'admin', 'kitchen', 'hookah_bar', 'waiter'] },
     { label: 'Меню', path: '/menu', icon: <BookOpen size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter'] },
     { label: 'Сотрудники', path: '/users', icon: <Users size={20} />, roles: ['sys_admin', 'director', 'admin'] },
     { label: 'Аналитика', path: '/analytics', icon: <BarChart3 size={20} />, roles: ['sys_admin', 'director', 'admin'] },
