@@ -53,6 +53,8 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     const [orderComment, setOrderComment] = useState('');
     const [commentDirty, setCommentDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    // Сообщение «Заказ сохранён» после нажатия кнопки «Сохранить»
+    const [savedFlash, setSavedFlash] = useState<string | null>(null);
     // Модалка подтверждения оплаты (вместо мгновенной оплаты по кнопке)
     const [showPayModal, setShowPayModal] = useState(false);
 
@@ -136,15 +138,22 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         }
     };
 
-    const handleSaveComment = async () => {
-        if (!commentDirty) return true;
+    // Сохранение заказа (комментарий): кнопка активна всегда, после успешного
+    // сохранения показываем сообщение «Заказ сохранён» и закрываем модалку.
+    const handleSaveOrder = async ({ closeAfter = true }: { closeAfter?: boolean } = {}) => {
         setSaving(true);
         try {
-            await api.patch(`/orders/${orderId}/comment`, { comment: orderComment });
-            setCommentDirty(false);
+            if (commentDirty) {
+                await api.patch(`/orders/${orderId}/comment`, { comment: orderComment });
+                setCommentDirty(false);
+            }
+            if (closeAfter) {
+                setSavedFlash('Заказ сохранён');
+                window.setTimeout(() => onClose(), 900);
+            }
             return true;
         } catch (err) {
-            alert(getApiErrorMessage(err, 'Не удалось сохранить комментарий'));
+            alert(getApiErrorMessage(err, 'Не удалось сохранить заказ'));
             return false;
         } finally {
             setSaving(false);
@@ -152,7 +161,6 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     };
 
     const handlePayOrder = async () => {
-        if (!(await handleSaveComment())) return;
         setShowPayModal(true);
     };
 
@@ -315,14 +323,23 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         </div>
                     )}
 
-                    {/* Большая кнопка СОХРАНИТЬ */}
+                    {/* Большая кнопка СОХРАНИТЬ (активна всегда) */}
                     <button
-                        onClick={handleSaveComment}
-                        disabled={saving || !commentDirty}
+                        onClick={() => handleSaveOrder()}
+                        disabled={saving}
                         className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blueberry-600 text-white text-base font-bold rounded-lg hover:bg-blueberry-700 transition disabled:opacity-50"
                     >
                         {saving ? <Loader2 className="animate-spin" size={20} /> : <Check size={20} />} Сохранить
                     </button>
+
+                    {/* Сообщение об успешном сохранении */}
+                    {savedFlash && (
+                        <div className="fixed inset-x-0 top-4 z-[100] flex justify-center pointer-events-none">
+                            <div className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg">
+                                <Check size={16} /> {savedFlash}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Ряд дополнительных действий */}
                     <div className="flex gap-2">
