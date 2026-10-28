@@ -264,7 +264,22 @@ export async function initDatabase() {
         await pool.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS composition TEXT`);
         // Комментарий к заказу: персона гостей, вкусовые предпочтения («убрать лук из салата»)
         await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT`);
-        console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment).');
+
+        // --- Гости за столом (раздельный счёт, персональные скидки) ---
+        // Таблица order_guests: до 16 гостей на один заказ (стол).
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS order_guests (
+                id SERIAL PRIMARY KEY,
+                order_id INT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                name VARCHAR(100),
+                discount_percent INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_guests_order ON order_guests(order_id)`);
+        // Привязка позиции заказа к конкретному гостю
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS guest_id INT REFERENCES order_guests(id) ON DELETE SET NULL`);
+        console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment, order_guests, order_items.guest_id).');
 
         // Страховка от NULL-флагов у старых seed-строк
         await pool.query(`UPDATE categories SET is_active = TRUE WHERE is_active IS NULL`);

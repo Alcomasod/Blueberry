@@ -9,7 +9,12 @@ import {
     updateOrderComment,
     getOrdersByRole,       // <-- ЗАМЕНИЛИ getMyOrders НА getOrdersByRole
     getOrderDetails,
-    findOpenOrderByTable
+    findOpenOrderByTable,
+    addOrderGuest,
+    updateOrderGuest,
+    removeOrderGuest,
+    getOrderGuests,
+    MAX_GUESTS_PER_ORDER
 } from '../services/orderService.js';
 import { getActiveShift } from '../services/shiftService.js';
 import { hasPermission, PERMISSIONS, Role } from '../config/permissions.js';
@@ -336,13 +341,22 @@ export async function handleUpdateQuantity(req: Request, res: Response) {
     }
 
     const { id, itemId } = req.params;
-    const { quantity } = req.body;
+    const { quantity, guest_id } = req.body;
 
     if (!quantity || quantity <= 0) {
         return res.status(400).json({
             success: false,
             error: 'Valid quantity (> 0) is required'
         });
+    }
+
+    // guest_id: число — привязать к гостю; null — отвязать; undefined — не менять
+    let guestId: number | null | undefined;
+    if (guest_id !== undefined) {
+        guestId = guest_id === null ? null : parseInt(String(guest_id), 10);
+        if (Number.isNaN(guestId)) {
+            return res.status(400).json({ success: false, error: 'Invalid guest_id' });
+        }
     }
 
     try {
@@ -353,11 +367,91 @@ export async function handleUpdateQuantity(req: Request, res: Response) {
             waiterId,
             parseInt(itemId, 10),
             quantity,
-            isAdmin
+            isAdmin,
+            guestId
         );
         res.json({ success: true, data: result });
     } catch (error) {
         console.error('Error updating quantity:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
+// ==========================================
+// ГОСТИ ЗА СТОЛОМ (раздельный счёт, персональные скидки)
+// ==========================================
+
+// GET /api/orders/:id/guests — список гостей с суммами и скидками
+export async function handleGetOrderGuests(req: Request, res: Response) {
+    try {
+        const guests = await getOrderGuests(parseInt(req.params.id, 10));
+        res.json({ success: true, data: { guests, max_guests: MAX_GUESTS_PER_ORDER } });
+    } catch (error) {
+        console.error('Error fetching order guests:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
+
+// POST /api/orders/:id/guests — добавить гостя ({ name? })
+export async function handleAddOrderGuest(req: Request, res: Response) {
+    const waiterId = req.user?.id;
+    if (!waiterId) return res.status(401).json({ success: false, error: 'User not authenticated' });
+
+    try {
+        const isAdmin = canManageAnyOrder(req.user?.role);
+        const guest = await addOrderGuest(
+            parseInt(req.params.id, 10),
+            waiterId,
+            typeof req.body?.name === 'string' ? req.body.name : null,
+            isAdmin
+        );
+        res.status(201).json({ success: true, data: guest });
+    } catch (error) {
+        console.error('Error adding guest:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
+
+// PATCH /api/orders/:id/guests/:guestId — имя/скидка ({ name?, discount_percent? })
+export async function handleUpdateOrderGuest(req: Request, res: Response) {
+    const waiterId = req.user?.id;
+    if (!waiterId) return res.status(401).json({ success: false, error: 'User not authenticated' });
+
+    const { name, discount_percent } = req.body ?? {};
+    try {
+        const isAdmin = canManageAnyOrder(req.user?.role);
+        const guest = await updateOrderGuest(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.guestId, 10),
+            waiterId,
+            {
+                name: typeof name === 'string' || name === null ? name : undefined,
+                discount_percent: typeof discount_percent === 'number' ? discount_percent : undefined,
+            },
+            isAdmin
+        );
+        res.json({ success: true, data: guest });
+    } catch (error) {
+        console.error('Error updating guest:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
+
+// DELETE /api/orders/:id/guests/:guestId — удалить гостя (позиции остаются в заказе)
+export async function handleRemoveOrderGuest(req: Request, res: Response) {
+    const waiterId = req.user?.id;
+    if (!waiterId) return res.status(401).json({ success: false, error: 'User not authenticated' });
+
+    try {
+        const isAdmin = canManageAnyOrder(req.user?.role);
+        const result = await removeOrderGuest(
+            parseInt(req.params.id, 10),
+            parseInt(req.params.guestId, 10),
+            waiterId,
+            isAdmin
+        );
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('Error removing guest:', error);
         res.status(400).json({ success: false, error: (error as Error).message });
     }
 }

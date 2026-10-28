@@ -9,7 +9,11 @@ import {
     handleUpdateQuantity,
     handleUpdateOrderComment,
     handleGetOrders,       // <-- ИСПОЛЬЗУЕМ НОВОЕ ИМЯ
-    handleGetOrderDetails
+    handleGetOrderDetails,
+    handleGetOrderGuests,
+    handleAddOrderGuest,
+    handleUpdateOrderGuest,
+    handleRemoveOrderGuest
 } from '../controllers/orderController.js';
 
 const router = Router();
@@ -46,7 +50,17 @@ router.delete('/:id/items/:itemId', handleRemoveItem);
 // PATCH /api/orders/:id/comment - Обновить комментарий к заказу (персона, предпочтения гостей)
 router.patch('/:id/comment', handleUpdateOrderComment);
 
-// PATCH /api/orders/:id/items/:itemId - Изменить количество
+// PATCH /api/orders/:id/items/:itemId - Изменить количество (и опционально гостя: guest_id)
 router.patch('/:id/items/:itemId', handleUpdateQuantity);
+
+// ===== ГОСТИ ЗА СТОЛОМ (раздельный счёт, персональные скидки) =====
+// GET /api/orders/:id/guests - список гостей с суммами и скидками
+router.get('/:id/guests', handleGetOrderGuests);
+// POST /api/orders/:id/guests - добавить гостя (макс. 16)
+router.post('/:id/guests', handleAddOrderGuest);
+// PATCH /api/orders/:id/guests/:guestId - имя / персональная скидка (%)
+router.patch('/:id/guests/:guestId', handleUpdateOrderGuest);
+// DELETE /api/orders/:id/guests/:guestId - удалить гостя (позиции остаются в заказе)
+router.delete('/:id/guests/:guestId', handleRemoveOrderGuest);
 
 export default router;

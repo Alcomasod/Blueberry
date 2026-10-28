@@ -1,11 +1,25 @@
 import pool from '../config/db.js';
 import { incrementCustomerVisitsAndPoints } from './customerService.js';
 
+export const MAX_GUESTS_PER_ORDER = 16;
+
 export interface OrderItemInput {
     menu_item_id?: number;
     combo_id?: number;
     quantity: number;
     comment?: string;
+    guest_id?: number | null;
+}
+
+export interface OrderGuestResult {
+    id: number;
+    order_id: number;
+    name: string | null;
+    discount_percent: number;
+    items_total: string;   // сумма позиций гостя до скидки
+    discount_amount: string; // сумма скидки в рублях
+    to_pay: string;        // к оплате (items_total - discount_amount)
+    items_count: number;
 }
 
 export interface CreatedOrderItem {
@@ -124,8 +138,8 @@ async function addItemsToOrderTx(
         total += price * item.quantity;
 
         const itemResult = await client.query(`
-            INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment, guest_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         `, [
             orderId,
@@ -135,7 +149,8 @@ async function addItemsToOrderTx(
             isCombo ? null : price,
             isCombo ? price : null,
             waiterId,
-            item.comment || null
+            item.comment || null,
+            item.guest_id || null
         ]);
         createdItems.push(itemResult.rows[0] as unknown as CreatedOrderItem);
         await logOrderHistory(
@@ -380,9 +395,9 @@ export async function addItemToOrder(orderId: number, waiterId: number, item: Or
         }
 
         const itemResult = await client.query(`
-            INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-        `, [orderId, item.menu_item_id || null, item.combo_id || null, item.quantity, isCombo ? null : price, isCombo ? price : null, waiterId, item.comment || null]);
+            INSERT INTO order_items (order_id, menu_item_id, combo_id, quantity, price_at_sale, combo_price, waiter_id, comment, guest_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+        `, [orderId, item.menu_item_id || null, item.combo_id || null, item.quantity, isCombo ? null : price, isCombo ? price : null, waiterId, item.comment || null, item.guest_id || null]);
 
         await logOrderHistory(client, orderId, waiterId, 'item_added', `Добавлено: ${itemName} x${item.quantity}`);
         const newTotal = await recalculateOrderTotal(orderId, client);
@@ -432,16 +447,34 @@ export async function removeItemFromOrder(orderId: number, waiterId: number, ite
     }
 }
 
-export async function updateItemQuantity(orderId: number, waiterId: number, itemId: number, newQuantity: number, isAdmin = false) {
+export async function updateItemQuantity(orderId: number, waiterId: number, itemId: number, newQuantity: number, isAdmin = false, guestId?: number | null) {
     if (newQuantity <= 0) throw new Error('Quantity must be greater than 0. Use DELETE endpoint instead.');
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         await validateOrderForEditing(orderId, waiterId, isAdmin);
-        const updateResult = await client.query(
-            `UPDATE order_items SET quantity = $1 WHERE id = $2 AND order_id = $3 RETURNING *`,
-            [newQuantity, itemId, orderId]
-        );
+
+        // Гость должен принадлежать этому же заказу
+        let guestValue: number | null | undefined;
+        if (guestId !== undefined) {
+            if (guestId === null) {
+                guestValue = null;
+            } else {
+                const gCheck = await client.query(`SELECT id FROM order_guests WHERE id = $1 AND order_id = $2`, [guestId, orderId]);
+                if (gCheck.rows.length === 0) throw new Error('Guest not found in this order');
+                guestValue = guestId;
+            }
+        }
+
+        const updateResult = guestValue === undefined
+            ? await client.query(
+                `UPDATE order_items SET quantity = $1 WHERE id = $2 AND order_id = $3 RETURNING *`,
+                [newQuantity, itemId, orderId]
+            )
+            : await client.query(
+                `UPDATE order_items SET quantity = $1, guest_id = $4 WHERE id = $2 AND order_id = $3 RETURNING *`,
+                [newQuantity, itemId, orderId, guestValue]
+            );
         if (updateResult.rows.length === 0) throw new Error('Item not found in this order');
 
         const nameRes = await client.query(
@@ -466,6 +499,117 @@ export async function updateItemQuantity(orderId: number, waiterId: number, item
     } finally {
         client.release();
     }
+}
+
+// ==========================================
+// ГОСТИ ЗА СТОЛОМ (раздельный счёт, персональные скидки)
+// ==========================================
+
+export async function addOrderGuest(orderId: number, waiterId: number, name: string | null, isAdmin = false): Promise<OrderGuestResult> {
+    await validateOrderForEditing(orderId, waiterId, isAdmin);
+
+    const countRes = await pool.query(`SELECT COUNT(*)::int as cnt FROM order_guests WHERE order_id = $1`, [orderId]);
+    if (countRes.rows[0].cnt >= MAX_GUESTS_PER_ORDER) {
+        throw new Error(`Максимум ${MAX_GUESTS_PER_ORDER} гостей за столом`);
+    }
+
+    const trimmed = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 100) : null;
+    const result = await pool.query(
+        `INSERT INTO order_guests (order_id, name) VALUES ($1, $2) RETURNING *`,
+        [orderId, trimmed]
+    );
+    const guest = result.rows[0];
+    await logOrderHistory(pool, orderId, waiterId, 'guest_added', `Добавлен гость: ${trimmed ?? `Гость ${guest.id}`}`);
+    return getOrderGuests(orderId).then((list) => list.find((g) => g.id === guest.id) as OrderGuestResult);
+}
+
+export async function updateOrderGuest(
+    orderId: number,
+    guestId: number,
+    waiterId: number,
+    data: { name?: string | null; discount_percent?: number },
+    isAdmin = false
+): Promise<OrderGuestResult> {
+    await validateOrderForEditing(orderId, waiterId, isAdmin);
+
+    const exists = await pool.query(`SELECT id FROM order_guests WHERE id = $1 AND order_id = $2`, [guestId, orderId]);
+    if (exists.rows.length === 0) throw new Error('Guest not found in this order');
+
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let idx = 1;
+    if (data.name !== undefined) {
+        updates.push(`name = $${idx++}`);
+        values.push(typeof data.name === 'string' && data.name.trim() ? data.name.trim().slice(0, 100) : null);
+    }
+    if (data.discount_percent !== undefined) {
+        const d = Math.max(0, Math.min(100, Math.round(Number(data.discount_percent) || 0)));
+        updates.push(`discount_percent = $${idx++}`);
+        values.push(d);
+    }
+    if (updates.length > 0) {
+        values.push(guestId, orderId);
+        await pool.query(`UPDATE order_guests SET ${updates.join(', ')} WHERE id = $${idx++} AND order_id = $${idx}`, values);
+    }
+
+    if (data.discount_percent !== undefined) {
+        await logOrderHistory(pool, orderId, waiterId, 'guest_updated', `Скидка гостя изменена на ${data.discount_percent}%`);
+    }
+    const list = await getOrderGuests(orderId);
+    const found = list.find((g) => g.id === guestId);
+    if (!found) throw new Error('Guest not found after update');
+    return found;
+}
+
+export async function removeOrderGuest(orderId: number, guestId: number, waiterId: number, isAdmin = false) {
+    await validateOrderForEditing(orderId, waiterId, isAdmin);
+
+    const exists = await pool.query(`SELECT id, name FROM order_guests WHERE id = $1 AND order_id = $2`, [guestId, orderId]);
+    if (exists.rows.length === 0) throw new Error('Guest not found in this order');
+
+    // Позиции гостя не удаляем — они становятся общими (guest_id -> NULL через ON DELETE SET NULL)
+    await pool.query(`DELETE FROM order_guests WHERE id = $1 AND order_id = $2`, [guestId, orderId]);
+    await logOrderHistory(pool, orderId, waiterId, 'guest_removed', `Гость удалён: ${exists.rows[0].name ?? 'без имени'} (его позиции остались в заказе)`);
+    return { removed_guest_id: guestId };
+}
+
+// Список гостей с расчётом сумм по их позициям и персональных скидок
+export async function getOrderGuests(orderId: number): Promise<OrderGuestResult[]> {
+    const result = await pool.query(`
+        SELECT
+            g.id,
+            g.order_id,
+            g.name,
+            g.discount_percent,
+            COALESCE(SUM(
+                CASE
+                    WHEN oi.menu_item_id IS NOT NULL THEN oi.quantity * oi.price_at_sale
+                    WHEN oi.combo_id IS NOT NULL THEN oi.combo_price
+                    ELSE 0
+                END
+            ), 0)::text as items_total,
+            COUNT(oi.id)::int as items_count
+        FROM order_guests g
+        LEFT JOIN order_items oi ON oi.guest_id = g.id
+        WHERE g.order_id = $1
+        GROUP BY g.id, g.order_id, g.name, g.discount_percent
+        ORDER BY g.id
+    `, [orderId]);
+
+    return result.rows.map((r) => {
+        const itemsTotal = parseFloat(String(r.items_total));
+        const discountAmount = Math.round(itemsTotal * (r.discount_percent / 100) * 100) / 100;
+        return {
+            id: r.id,
+            order_id: r.order_id,
+            name: r.name,
+            discount_percent: r.discount_percent,
+            items_total: itemsTotal.toFixed(2),
+            discount_amount: discountAmount.toFixed(2),
+            to_pay: (itemsTotal - discountAmount).toFixed(2),
+            items_count: r.items_count,
+        };
+    });
 }
 
 // ==========================================
@@ -640,6 +784,25 @@ export async function getOrderDetails(orderId: number, userRole: string, userId:
         ORDER BY oi.id
     `, [orderId]);
 
+    // Guest-привязка позиций: колонки order_guests/guest_id появляются после лёгкой
+    // миграции. Для старых БД — fallback на NULL, чтобы детали заказа не падали.
+    let itemsRows = itemsRes.rows as Record<string, unknown>[];
+    try {
+        const gidRes = await pool.query(
+            `SELECT oi.id, oi.guest_id, g.name as guest_name
+             FROM order_items oi
+             LEFT JOIN order_guests g ON g.id = oi.guest_id
+             WHERE oi.order_id = $1`,
+            [orderId]
+        );
+        const byId = new Map<number, { guest_id: number | null; guest_name: string | null }>(
+            gidRes.rows.map((r) => [r.id, { guest_id: r.guest_id ?? null, guest_name: r.guest_name ?? null }])
+        );
+        itemsRows = itemsRows.map((it) => ({ ...it, ...(byId.get(it.id as number) ?? { guest_id: null, guest_name: null }) }));
+    } catch {
+        itemsRows = itemsRows.map((it) => ({ ...it, guest_id: null, guest_name: null }));
+    }
+
     const historyRes = await pool.query(`
         SELECT oh.id, oh.action, oh.details, oh.created_at, u.full_name as user_name
         FROM order_history oh
@@ -648,5 +811,11 @@ export async function getOrderDetails(orderId: number, userRole: string, userId:
         ORDER BY oh.created_at ASC, oh.id ASC
     `, [orderId]);
 
-    return { ...order, items: itemsRes.rows, history: historyRes.rows };
+    // Гости стола (раздельный счёт / персональные скидки). Для старых схем — пустой список.
+    let guests: OrderGuestResult[] = [];
+    try {
+        guests = await getOrderGuests(orderId);
+    } catch { /* таблица order_guests ещё не создана — не критично */ }
+
+    return { ...order, items: itemsRows, history: historyRes.rows, guests };
 }

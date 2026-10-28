@@ -670,8 +670,10 @@ const TablesPage = () => {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Вместимость (чел.)</label>
-                        <input type="number" value={newTableCapacity} onChange={(e) => setNewTableCapacity(parseInt(e.target.value))} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2" min="1" required />
+                        {/* Количество гостей настраивается в карточке заказа (модалка «Заказ»):
+                            блок «Гости за столом» — раздельный счёт и персональные скидки. */}
+                        <p className="text-xs text-gray-500">Гостей можно добавить при редактировании заказа (блок «Гости за столом»).</p>
+                        <input type="hidden" name="capacity" value={newTableCapacity} />
                     </div>
                     <button type="submit" className="w-full px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition">Создать стол</button>
                 </form>
@@ -692,8 +694,9 @@ const TablesPage = () => {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Вместимость (чел.)</label>
-                            <input type="number" value={editingTable.capacity} onChange={(e) => setEditingTable({ ...editingTable, capacity: parseInt(e.target.value) })} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2" min="1" required />
+                            {/* Вместимость больше не редактируется здесь: гости за столом
+                                настраиваются в карточке заказа (блок «Гости за столом»). */}
+                            <p className="text-xs text-gray-500">Вместимость: {editingTable.capacity} чел. (гости настраиваются в карточке заказа)</p>
                         </div>
                         <button type="submit" className="w-full px-4 py-2 bg-blueberry-600 text-white rounded-lg hover:bg-blueberry-700 transition">Сохранить</button>
                     </form>
