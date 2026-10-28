@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { getApiErrorMessage } from '../lib/apiError';
 import { useAuthStore } from '../store/authStore';
 import OrderDetailsModal from '../components/OrderDetailsModal';
+import PaymentModal from '../components/PaymentModal';
 import {
     Users, CheckCircle, XCircle, Clock, RefreshCw,
     Plus, Trash2, Edit
@@ -47,8 +48,10 @@ const TablesPage = () => {
     const [selectedTable, setSelectedTable] = useState<Table | null>(null);
     // Заказ, открытый прямо на странице столов (модалка с меню из БД)
     const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
-    // Быстрое закрытие счёта из карточки стола (admin+)
-    const [closingOrder, setClosingOrder] = useState(false);
+    // Модалка подтверждения оплаты/закрытия счёта (вместо нативного confirm())
+    const [payTarget, setPayTarget] = useState<{ orderId: number; label: string } | null>(null);
+    // Стол, для которого нужно освободить статус после подтверждения оплаты
+    const [freeTableAfterPay, setFreeTableAfterPay] = useState<number | null>(null);
 
     // Состояния модалок
     const [showAddZoneModal, setShowAddZoneModal] = useState(false);
@@ -176,24 +179,16 @@ const TablesPage = () => {
 
     const handleChangeStatus = async (tableId: number, status: 'free' | 'occupied' | 'reserved') => {
         // Если стол вручную переводят в «свободен», а на нём открыт счёт —
-        // предупреждаем и предлагаем закрыть счёт (как на странице «Заказы»).
+        // показываем модалку подтверждения оплаты (как на странице «Заказы»).
         if (status === 'free') {
             const openOrderId = openOrdersByTable.get(tableId);
             if (openOrderId !== undefined) {
-                const closeNow = confirm(
-                    'На столе открыт неоплаченный счёт.\n\n' +
-                    '«OK» — закрыть счёт (отметить оплату) и освободить стол.\n' +
-                    '«Отмена» — оставить счёт открытым (стол останется занят).',
-                );
-                if (!closeNow) return;
-                try {
-                    await api.post(`/orders/${openOrderId}/close`);
-                } catch (err) {
-                    alert(getApiErrorMessage(err, 'Не удалось закрыть счёт'));
-                    return;
-                }
-                setSelectedTable(null);
-                await fetchData();
+                const table = tables.find((t) => t.id === tableId);
+                setFreeTableAfterPay(tableId);
+                setPayTarget({
+                    orderId: openOrderId,
+                    label: `Стол #${table?.number ?? '?'} (заказ №${openOrderId})`,
+                });
                 return;
             }
         }
@@ -207,18 +202,15 @@ const TablesPage = () => {
             // 409 — бэкенд нашёл открытый счёт (фронт мог о нём не знать)
             if (e.response?.data?.code === 'OPEN_ORDER_EXISTS') {
                 const orderId = e.response.data.data?.order_id;
-                const closeNow = window.confirm(
-                    'На столе открыт неоплаченный счёт. Сначала закройте его.\n\n' +
-                    '«OK» — закрыть счёт и освободить стол.',
-                );
-                if (closeNow && orderId) {
-                    try {
-                        await api.post(`/orders/${orderId}/close`);
-                        await api.patch(`/tables/${tableId}/status`, { status: 'free' });
-                        setSelectedTable(null);
-                    } catch (err2) {
-                        alert(getApiErrorMessage(err2, 'Не удалось закрыть счёт'));
-                    }
+                if (orderId) {
+                    const table = tables.find((t) => t.id === tableId);
+                    setFreeTableAfterPay(tableId);
+                    setPayTarget({
+                        orderId,
+                        label: `Стол #${table?.number ?? '?'} (заказ №${orderId})`,
+                    });
+                } else {
+                    alert('На столе открыт неоплаченный счёт. Сначала закройте его.');
                 }
                 await fetchData();
                 return;
@@ -227,29 +219,39 @@ const TablesPage = () => {
         }
     };
 
+    // Успешная оплата из модалки PaymentModal: освобождаем стол (если требовалось)
+    // и обновляем данные.
+    const handlePaymentSuccess = async () => {
+        const tableToFree = freeTableAfterPay;
+        setPayTarget(null);
+        setFreeTableAfterPay(null);
+        setSelectedTable(null);
+        try {
+            if (tableToFree !== null) {
+                // Бэкенд при закрытии счёта сам освобождает стол, но на старых
+                // сборках (fallback через PATCH статуса) стол мог остаться занятым.
+                await api.patch(`/tables/${tableToFree}/status`, { status: 'free' }).catch(() => {});
+            }
+        } finally {
+            await fetchData();
+        }
+    };
+
     // Закрытие счёта прямо из карточки стола (кнопка для admin+).
-    // Использует тот же путь, что и страница «Заказы»: POST /orders/:id/close
-    // (оплата со статусом paid + освобождение стола на бэкенде).
-    const handleCloseBill = async () => {
+    // Показывает ту же модалку подтверждения оплаты, что и страница «Заказы».
+    const handleCloseBill = () => {
         if (!selectedTable) return;
         const orderId = openOrdersByTable.get(selectedTable.id);
         if (orderId === undefined) {
             alert('На столе нет открытого счёта.');
-            await fetchData();
+            fetchData();
             return;
         }
-        if (!confirm(`Закрыть счёт стола #${selectedTable.number} и отметить оплату?`)) return;
-
-        setClosingOrder(true);
-        try {
-            await api.post(`/orders/${orderId}/close`);
-            setSelectedTable(null);
-            await fetchData();
-        } catch (err) {
-            alert(getApiErrorMessage(err, 'Не удалось закрыть счёт'));
-        } finally {
-            setClosingOrder(false);
-        }
+        setFreeTableAfterPay(null); // /orders/:id/close сам освободит стол
+        setPayTarget({
+            orderId,
+            label: `Стол #${selectedTable.number} (заказ №${orderId})`,
+        });
     };
 
     const handleCreateOrder = async () => {
@@ -579,10 +581,9 @@ const TablesPage = () => {
                                 {isAdmin && openOrdersByTable.has(selectedTable.id) && (
                                     <button
                                         onClick={handleCloseBill}
-                                        disabled={closingOrder}
-                                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium disabled:opacity-50"
+                                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium"
                                     >
-                                        {closingOrder ? 'Закрываю…' : 'Закрыть счёт'}
+                                        Закрыть счёт
                                     </button>
                                 )}
                                 {!openOrdersByTable.has(selectedTable.id) && (
@@ -707,6 +708,17 @@ const TablesPage = () => {
                         setActiveOrderId(null);
                         fetchData();
                     }}
+                />
+            )}
+
+            {/* ===== МОДАЛКА: подтверждение оплаты/закрытия счёта ===== */}
+            {payTarget && (
+                <PaymentModal
+                    orderId={payTarget.orderId}
+                    orderLabel={payTarget.label}
+                    mode="close"
+                    onClose={() => { setPayTarget(null); setFreeTableAfterPay(null); }}
+                    onSuccess={handlePaymentSuccess}
                 />
             )}
         </div>

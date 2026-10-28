@@ -6,6 +6,7 @@ import { formatAmount } from '../lib/format';
 import { buildCatalog, type CatalogCategory, type FlatMenuItem } from '../lib/menuTree';
 import { Plus, Minus, Trash2, CreditCard, Search, Loader2, History, Check } from 'lucide-react';
 import Modal from './Modal';
+import PaymentModal from './PaymentModal';
 
 interface OrderDetailsModalProps {
     orderId: number;
@@ -52,6 +53,8 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     const [orderComment, setOrderComment] = useState('');
     const [commentDirty, setCommentDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    // Модалка подтверждения оплаты (вместо мгновенной оплаты по кнопке)
+    const [showPayModal, setShowPayModal] = useState(false);
 
     const fetchData = async () => {
         try {
@@ -150,10 +153,29 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
     const handlePayOrder = async () => {
         if (!(await handleSaveComment())) return;
+        setShowPayModal(true);
+    };
+
+    // Оплата из модалки подтверждения — через основной эндпоинт POST /orders/:id/pay
+    // (начисление баллов, освобождение стола и т.д. на бэкенде).
+    const confirmPaymentFromDetails = async () => {
         try {
-            await api.patch(`/orders/${orderId}`, { status: 'paid' });
+            await api.post(`/orders/${orderId}/pay`, {
+                payment_method: 'card',
+                tip_amount: 0,
+                discount_amount: 0,
+            });
             onClose();
         } catch (err) {
+            // Fallback для старых сборок бэкенда: PATCH статуса (как было раньше)
+            const status = (err as { response?: { status?: number } })?.response?.status;
+            if (status === 404) {
+                try {
+                    await api.patch(`/orders/${orderId}`, { status: 'paid' });
+                    onClose();
+                    return;
+                } catch { /* падаем в общее сообщение об ошибке */ }
+            }
             alert(getApiErrorMessage(err, 'Ошибка оплаты заказа'));
         }
     };
@@ -315,6 +337,18 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         </button>
                     </div>
                 </div>
+            )}
+
+            {/* Модалка подтверждения оплаты (замена мгновенной оплаты по кнопке) */}
+            {showPayModal && (
+                <PaymentModal
+                    orderId={orderId}
+                    orderLabel={order ? `Стол #${order.table_number} (заказ №${orderId})` : `№${orderId}`}
+                    amount={formatAmount(total)}
+                    mode="pay"
+                    onClose={() => setShowPayModal(false)}
+                    onSuccess={confirmPaymentFromDetails}
+                />
             )}
         </Modal>
     );

@@ -1,10 +1,10 @@
 // src/pages/OrdersPage.tsx
 import { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
-import { getApiErrorMessage } from '../lib/apiError';
 import { formatAmount } from '../lib/format';
 import { useAuthStore } from '../store/authStore';
 import OrderDetailsModal from '../components/OrderDetailsModal';
+import PaymentModal from '../components/PaymentModal';
 import {
     RefreshCw, Clock, Users, CreditCard, Search,
     Filter, AlertTriangle, CheckCircle, XCircle, Eye
@@ -33,6 +33,8 @@ const OrdersPage = () => {
     const [zones, setZones] = useState<Zone[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+    // Модалка подтверждения оплаты (замена нативного confirm())
+    const [payTarget, setPayTarget] = useState<{ id: number; label: string; amount: string } | null>(null);
 
     // Состояния фильтров
     const [filterStatus, setFilterStatus] = useState<string>('open');
@@ -106,21 +108,14 @@ const OrdersPage = () => {
         [filteredOrders, currentUserId]
     );
 
-    // Быстрая оплата
-    const handleQuickPay = async (e: React.MouseEvent, orderId: number, total: string) => {
-        e.stopPropagation(); // Чтобы не открывалась модалка
-        if (!confirm(`Оплатить заказ #${orderId} на сумму ${total} ₽ наличными/картой?`)) return;
-
-        try {
-            await api.post(`/orders/${orderId}/pay`, {
-                payment_method: 'card',
-                tip_amount: 0,
-                discount_amount: 0
-            });
-            await fetchData(); // Обновляем список
-        } catch (err) {
-            alert(getApiErrorMessage(err, 'Ошибка оплаты'));
-        }
+    // Быстрая оплата — открывает модалку подтверждения (вместо нативного confirm())
+    const handleQuickPay = (e: React.MouseEvent, order: Order) => {
+        e.stopPropagation(); // Чтобы не открывалась модалка деталей
+        setPayTarget({
+            id: order.id,
+            label: `Стол #${order.table_number} (заказ №${order.id})`,
+            amount: formatAmount(order.total_amount),
+        });
     };
 
     const getStatusBadge = (status: string) => {
@@ -190,7 +185,7 @@ const OrdersPage = () => {
                 {order.status === 'open' && (
                     <div className="flex gap-2 mt-4">
                         <button
-                            onClick={(e) => handleQuickPay(e, order.id, order.total_amount)}
+                            onClick={(e) => handleQuickPay(e, order)}
                             className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium"
                             title="Быстрая оплата"
                         >
@@ -297,6 +292,18 @@ const OrdersPage = () => {
                 <OrderDetailsModal
                     orderId={selectedOrderId}
                     onClose={() => { setSelectedOrderId(null); fetchData(); }}
+                />
+            )}
+
+            {/* Модалка подтверждения оплаты (быстрая оплата из карточки) */}
+            {payTarget && (
+                <PaymentModal
+                    orderId={payTarget.id}
+                    orderLabel={payTarget.label}
+                    amount={payTarget.amount}
+                    mode="pay"
+                    onClose={() => setPayTarget(null)}
+                    onSuccess={() => { setPayTarget(null); fetchData(); }}
                 />
             )}
         </div>
