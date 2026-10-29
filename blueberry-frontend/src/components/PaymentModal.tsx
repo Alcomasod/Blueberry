@@ -53,9 +53,8 @@ const PaymentModal = ({
             }
             onSuccess();
         } catch (err) {
-            // Fallback для старых сборок бэкенда без новых эндпоинтов:
-            // закрываем счёт через PATCH статуса (как работало раньше).
             const status = (err as { response?: { status?: number } })?.response?.status;
+            // 404 — старый бэкенд без эндпоинта: fallback через PATCH статуса.
             if (status === 404 && mode === 'close') {
                 try {
                     await api.patch(`/orders/${orderId}`, { status: 'paid' });
@@ -65,6 +64,13 @@ const PaymentModal = ({
                     setError(getApiErrorMessage(err, 'Не удалось закрыть счёт'));
                     return;
                 }
+            }
+            // 404 на /pay — модалка открылась для уже закрытого/оплаченного заказа
+            // (например, предыдущая попытка оплаты прошла успешно, но стол был освобождён).
+            // Считаем счёт закрытым и штатно обновляем интерфейс.
+            if (status === 404 && mode === 'pay') {
+                onSuccess();
+                return;
             }
             setError(getApiErrorMessage(err, 'Ошибка оплаты'));
         } finally {

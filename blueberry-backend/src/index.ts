@@ -121,9 +121,10 @@ const STARTUP_TS = Date.now();
 // Ожидаемый ответ после пересборки: 200 с build >= 2026-10-28a (close endpoint available: true)
 app.get('/api/_build-info', (_req: Request, res: Response) => {
     res.json({
-        build: '2026-10-28b',
+        build: '2026-10-29a',
         patchOrderEndpointAvailable: true,
         closeEndpointAvailable: true,
+        payTransactionSafe: true,
         node: process.version,
         startedAt: new Date(STARTUP_TS).toISOString(),
     });

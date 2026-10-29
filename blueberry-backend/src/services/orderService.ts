@@ -302,14 +302,31 @@ export async function payOrder(
             await logOrderHistory(client, orderId, paidByUserId, 'paid', `Заказ оплачен (${paymentMethod})`);
         }
 
-        // Начисляем баллы постояннику, если он привязан к заказу
-        if (order.customer_id) {
-            const orderAmount = parseFloat(order.total_amount) + tipAmount - discountAmount;
-            await incrementCustomerVisitsAndPoints(order.customer_id, orderAmount);
+        // Второстепенные операции не должны отменять уже записанную оплату:
+        // любая ошибка здесь только логируется, а не приводит к ROLLBACK.
+        try {
+            // Начисляем баллы постояннику, если он привязан к заказу
+            if (order.customer_id) {
+                const orderAmount = parseFloat(order.total_amount) + tipAmount - discountAmount;
+                await incrementCustomerVisitsAndPoints(order.customer_id, orderAmount);
+            }
+        } catch (e) {
+            console.error('payOrder: failed to accrue customer points (order still paid):', e);
         }
 
-        if (order.table_id) {
-            await client.query(`UPDATE tables SET status = 'free' WHERE id = $1`, [order.table_id]);
+        try {
+            if (order.table_id) {
+                await client.query(`UPDATE tables SET status = 'free' WHERE id = $1`, [order.table_id]);
+            }
+        } catch (e) {
+            console.error('payOrder: failed to free table (order still paid):', e);
+        }
+
+        // Фиксируем суммы гостей для раздельного счёта (не критично при ошибке)
+        try {
+            await persistGuestPaidAmounts(orderId);
+        } catch (e) {
+            console.warn('payOrder: guest amounts not persisted:', (e as Error).message);
         }
 
         await client.query('COMMIT');
@@ -622,6 +639,23 @@ export async function getOrderGuests(orderId: number): Promise<OrderGuestResult[
 // ==========================================
 // ПОЛУЧЕНИЕ СПИСКА ЗАКАЗОВ
 // ==========================================
+
+// Суммы к оплате по каждому гостю на момент оплаты (для раздельного счёта).
+// Сохраняются в order_guests.paid_amount, чтобы история «кто сколько заплатил»
+// не терялась после закрытия заказа. Для старых схем — тихий no-op.
+export async function persistGuestPaidAmounts(orderId: number): Promise<void> {
+    try {
+        const guests = await getOrderGuests(orderId);
+        for (const g of guests) {
+            await pool.query(
+                `UPDATE order_guests SET paid_amount = $1 WHERE id = $2`,
+                [g.to_pay, g.id],
+            );
+        }
+    } catch (e) {
+        console.warn('payOrder: could not persist guest paid amounts (skipped):', (e as Error).message);
+    }
+}
 
 export async function getOrdersByRole(
     role: string,
