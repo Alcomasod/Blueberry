@@ -132,8 +132,9 @@ app.get('/api/_build-info', (_req: Request, res: Response) => {
 
 app.use('/api/orders', authenticateToken, orderRoutes);
 
-// Аналитика: только admin+
-app.use('/api/analytics', authenticateToken, requirePermission(PERMISSIONS.VIEW_ANALYTICS), analyticsRoutes);
+// Аналитика: /my-shift и /top-items — всем сотрудникам (защита на уровне роута),
+// остальные эндпоинты — admin+ (requirePermission внутри analyticsRoutes)
+app.use('/api/analytics', authenticateToken, analyticsRoutes);
 
 // Пользователи: только admin+
 app.use('/api/users', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), userRoutes);

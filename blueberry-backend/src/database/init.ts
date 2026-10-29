@@ -281,6 +281,10 @@ export async function initDatabase() {
         await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS guest_id INT REFERENCES order_guests(id) ON DELETE SET NULL`);
         // Сумма гостя к оплате, зафиксированная в момент закрытия счёта (раздельный счёт)
         await pool.query(`ALTER TABLE order_guests ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(10,2)`);
+
+        // Аналитика: привязка оплаченного заказа к закрытой смене (для расчёта часов по фактическим сменам)
+        await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INT REFERENCES shifts(id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_shift ON orders(shift_id)`);
         console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment, order_guests, order_items.guest_id).');
 
         // Страховка от NULL-флагов у старых seed-строк

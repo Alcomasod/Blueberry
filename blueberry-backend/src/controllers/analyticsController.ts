@@ -4,8 +4,61 @@ import {
     getRevenueByCategory,
     getTopWaiters,
     getTopSellingItems,
-    getShiftStatistics
+    getShiftStatistics,
+    getShiftSummary,
+    getHookahRevenue,
+    getMyStats,
+    getAvgCheckPerGuest
 } from '../services/analyticsService.js';
+
+// Текущий "операционный день": до 04:00 утра — это ещё вчера (заведение работает 13:00–04:00)
+function currentBusinessDate(): string {
+    const now = new Date();
+    if (now.getHours() < 4) now.setDate(now.getDate() - 1);
+    return now.toISOString().slice(0, 10);
+}
+
+function resolveDate(raw: unknown): string {
+    return typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : currentBusinessDate();
+}
+
+// GET /api/analytics/shift-summary?date=YYYY-MM-DD (админ+)
+export async function handleShiftSummary(req: Request, res: Response) {
+    try {
+        const data = await getShiftSummary(resolveDate(req.query.date));
+        res.json({ success: true, data });
+    } catch (error) {
+        console.error('Error fetching shift summary:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch shift summary' });
+    }
+}
+
+// GET /api/analytics/hookah-revenue?start_date=&end_date= (админ+)
+export async function handleHookahRevenue(req: Request, res: Response) {
+    try {
+        const start = typeof req.query.start_date === 'string' ? req.query.start_date : currentBusinessDate();
+        const end = typeof req.query.end_date === 'string' ? req.query.end_date : start;
+        const data = await getHookahRevenue(start, end);
+        res.json({ success: true, data });
+    } catch (error) {
+        console.error('Error fetching hookah revenue:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch hookah revenue' });
+    }
+}
+
+// GET /api/analytics/my-shift (все сотрудники — только свои данные)
+export async function handleMyShift(req: Request, res: Response) {
+    try {
+        const userId = req.user?.id;
+        if (!userId) return res.status(401).json({ success: false, error: 'User not authenticated' });
+        const date = resolveDate(req.query.date);
+        const [stats, avgGuest] = await Promise.all([getMyStats(userId, date), getAvgCheckPerGuest(date)]);
+        res.json({ success: true, data: { ...stats, avg_check_per_guest: avgGuest.avg_check_per_guest } });
+    } catch (error) {
+        console.error('Error fetching my-shift stats:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch my shift stats' });
+    }
+}
 
 // Выручка за день
 export async function handleDailyRevenue(req: Request, res: Response) {

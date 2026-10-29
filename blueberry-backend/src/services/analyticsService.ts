@@ -93,7 +93,124 @@ export async function getTopSellingItems(startDate: string, endDate: string) {
     return result.rows;
 }
 
-// 5. Статистика по сменам (для управляющего)
+// ─── Утилиты аналитики ─────────────────────────────────────────────
+// Специфика заведения: смена длится с 13:00 до 04:00 следующего дня.
+// "Операционный день" N = интервал [N 13:00, N+1 04:00).
+export function shiftWindow(date: string): { from: string; to: string } {
+    return {
+        from: `${date} 13:00:00`,
+        to: `${shiftNextDate(date)} 04:00:00`,
+    };
+}
+
+function shiftNextDate(date: string): string {
+    const d = new Date(`${date}T12:00:00`);
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+}
+
+// 5. Сводка смены для администрации: всё за операционный день
+export async function getShiftSummary(date: string) {
+    const w = shiftWindow(date);
+    const result = await pool.query(`
+        WITH paid AS (
+            SELECT o.* FROM orders o
+            WHERE o.status = 'paid' AND o.closed_at >= $1 AND o.closed_at < $2
+        )
+        SELECT
+            (SELECT COUNT(*) FROM paid)                                          AS total_orders,
+            (SELECT COALESCE(SUM(total_amount), 0) FROM paid)                    AS total_revenue,
+            (SELECT COALESCE(SUM(discount_amount), 0) FROM paid)                 AS total_discounts,
+            (SELECT COALESCE(SUM(tip_amount), 0) FROM paid)                      AS total_tips,
+            (SELECT COALESCE(AVG(total_amount), 0) FROM paid)                    AS average_check,
+            (SELECT COUNT(DISTINCT table_id) FROM paid WHERE table_id IS NOT NULL) AS tables_served,
+            (SELECT COUNT(g.id) FROM order_guests g
+                JOIN orders o ON o.id = g.order_id
+                WHERE o.status = 'paid' AND o.closed_at >= $1 AND o.closed_at < $2) AS guests_total,
+            (SELECT COUNT(*) FROM shifts s
+                WHERE s.start_time >= $1 AND s.start_time < $2)                  AS staff_on_shift,
+            (SELECT COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total_amount ELSE 0 END), 0) FROM paid) AS cash_revenue,
+            (SELECT COALESCE(SUM(CASE WHEN payment_method = 'card' THEN total_amount ELSE 0 END), 0) FROM paid) AS card_revenue
+    `, [w.from, w.to]);
+    return result.rows[0];
+}
+
+// 6. Выручка по кальянам за период (через hookah_orders -> orders)
+export async function getHookahRevenue(startDate: string, endDate: string) {
+    const result = await pool.query(`
+        SELECT
+            COUNT(DISTINCT ho.id)                          AS hookah_orders_count,
+            COALESCE(SUM(hoi.quantity), 0)                 AS flavors_quantity,
+            COALESCE(SUM(o.total_amount), 0)               AS hookah_revenue
+        FROM hookah_orders ho
+            JOIN orders o ON o.id = ho.order_id
+            LEFT JOIN hookah_order_items hoi ON hoi.hookah_order_id = ho.id
+        WHERE o.status = 'paid'
+          AND o.closed_at >= $1 AND o.closed_at < $2
+    `, [`${startDate} 13:00:00`, `${shiftNextDate(endDate)} 04:00:00`]);
+    return result.rows[0];
+}
+
+// 7. Персональная статистика сотрудника ("Моя смена")
+export async function getMyStats(userId: number, date: string) {
+    const w = shiftWindow(date);
+    // Основной блок: по закрытым заказам официанта за операционный день
+    const main = await pool.query(`
+        SELECT
+            COUNT(o.id)                                            AS orders_count,
+            COALESCE(SUM(o.total_amount), 0)                       AS revenue,
+            COALESCE(AVG(NULLIF(o.total_amount, 0)), 0)            AS avg_check,
+            COUNT(DISTINCT o.table_id)                             AS tables_served,
+            COALESCE(SUM((SELECT COUNT(*) FROM order_guests g WHERE g.order_id = o.id)), 0) AS guests_served,
+            COALESCE(SUM(o.discount_amount), 0)                    AS discounts_given,
+            COALESCE(SUM(o.tip_amount), 0)                         AS tips
+        FROM orders o
+        WHERE o.waiter_id = $1
+          AND o.status = 'paid'
+          AND o.closed_at >= $2 AND o.closed_at < $3
+    `, [userId, w.from, w.to]);
+
+    // Отработанные часы: суммарная длительность смен за последние 30 дней (план "б": timestamp из shifts)
+    const hours = await pool.query(`
+        SELECT
+            COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(s.end_time, NOW()) - s.start_time)) / 3600), 0) AS hours_30d,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(s.end_time, NOW()) - s.start_time)) / 3600)
+                FILTER (WHERE s.shift_date = $2 OR (s.shift_date = ($2::date - 1) AND s.start_time >= ($2::date - 1 || ' 13:00')::timestamp))
+            , 0)                                      AS hours_today
+        FROM shifts s
+        WHERE s.waiter_id = $1
+          AND s.start_time >= CURRENT_DATE - INTERVAL '30 days'
+    `, [userId, date]);
+
+    // Лучший стол смены
+    const bestTable = await pool.query(`
+        SELECT t.number AS table_number, o.total_amount
+        FROM orders o
+            LEFT JOIN tables t ON t.id = o.table_id
+        WHERE o.waiter_id = $1 AND o.status = 'paid'
+          AND o.closed_at >= $2 AND o.closed_at < $3
+        ORDER BY o.total_amount DESC
+        LIMIT 1
+    `, [userId, w.from, w.to]);
+
+    return { ...main.rows[0], ...hours.rows[0], best_table: bestTable.rows[0] ?? null };
+}
+
+// 8. Средний чек по гостю за операционный день (админ)
+export async function getAvgCheckPerGuest(date: string) {
+    const w = shiftWindow(date);
+    const result = await pool.query(`
+        SELECT
+            COALESCE(SUM(o.total_amount), 0)                                    AS revenue,
+            NULLIF(SUM((SELECT COUNT(*) FROM order_guests g WHERE g.order_id = o.id)), 0) AS guests,
+            COALESCE(SUM(o.total_amount) / NULLIF(SUM((SELECT COUNT(*) FROM order_guests g WHERE g.order_id = o.id)), 0), 0) AS avg_check_per_guest
+        FROM orders o
+        WHERE o.status = 'paid' AND o.closed_at >= $1 AND o.closed_at < $2
+    `, [w.from, w.to]);
+    return result.rows[0];
+}
+
+// 9. Статистика по сменам (для управляющего)
 export async function getShiftStatistics(startDate: string, endDate: string) {
     const result = await pool.query(`
         SELECT 
