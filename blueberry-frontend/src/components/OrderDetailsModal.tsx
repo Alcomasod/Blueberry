@@ -329,6 +329,19 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         [order],
     );
 
+    // Предварительный счёт гостя с учётом его персональной скидки в %
+    const guestSubtotal = (g: OrderGuest): number => {
+        const itemsSum = (order?.items ?? []).filter((i) => i.guest_id === g.id).reduce((s, i) => s + Number(i.line_total), 0);
+        return Math.round(itemsSum * (1 - Math.max(0, Math.min(100, Number(g.discount_percent) || 0)) / 100));
+    };
+
+    // Итого по заказу = суммы гостей (со скидками) + общие позиции без скидки
+    const totalWithDiscounts = useMemo(() => {
+        const guestsSum = guests.reduce((s, g) => s + guestSubtotal(g), 0);
+        return guests.length > 0 ? guestsSum + sharedTotal : total;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [order, guests, total, sharedTotal]);
+
     // ===== Секция «Гости за столом»: раздельный счёт и персональные скидки =====
     const guestsSection = (
         <div className="rounded-md border border-gray-200 p-3" onClick={(e) => e.stopPropagation()}>
@@ -490,7 +503,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            size={showAddPanel ? 'full' : 'xl'}
+            size={showAddPanel ? 'wide' : 'lg'}
             title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'}
         >
             {loading ? (
@@ -513,13 +526,11 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                             <ul className="divide-y divide-gray-100">
                                 {(() => {
                                     // Группировка позиций по гостям (item 3): секция на гостя + общие позиции
-                                    const sections: Array<{ key: string; title: string; items: OrderItem[] }> = [];
+                                    const sections: Array<{ key: string; title: string; items: OrderItem[]; subtotal?: number }> = [];
                                     if (guests.length > 0) {
                                         guests.forEach((g, gi) => {
                                             const gItems = order.items.filter((i) => i.guest_id === g.id);
-                                            if (gItems.length > 0) {
-                                                sections.push({ key: `g-${g.id}`, title: guestLabel(g, gi), items: gItems });
-                                            }
+                                            sections.push({ key: `g-${g.id}`, title: guestLabel(g, gi), items: gItems, subtotal: guestSubtotal(g) });
                                         });
                                         const shared = order.items.filter((i) => !i.guest_id);
                                         if (shared.length > 0) sections.push({ key: 'shared', title: 'Общие позиции', items: shared });
@@ -529,7 +540,14 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                                     return sections.map((sec) => (
                                 <li key={sec.key} className="py-2">
                                 {sec.title ? (
-                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">{sec.title}</p>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{sec.title}</p>
+                                        {typeof sec.subtotal === 'number' && (
+                                            <span className="text-[11px] font-semibold text-blueberry-700" title="Предварительный счёт гостя с учётом персональной скидки">
+                                                к оплате: {formatAmount(sec.subtotal)} р
+                                            </span>
+                                        )}
+                                    </div>
                                 ) : null}
                                 <ul className="divide-y divide-gray-50">
                                 {sec.items.map((it) => (
@@ -569,9 +587,16 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     </div>
 
                     {/* Итого */}
-                    <div className="rounded-md bg-blueberry-50 px-3 py-2 flex justify-between font-bold text-blueberry-900">
-                        <span>Итого</span>
-                        <span>{formatAmount(total)} р</span>
+                    <div className="rounded-md bg-blueberry-50 px-3 py-2 space-y-0.5">
+                        <div className="flex justify-between font-bold text-blueberry-900">
+                            <span>Итого</span>
+                            <span>{formatAmount(totalWithDiscounts)} р</span>
+                        </div>
+                        {totalWithDiscounts !== total && (
+                            <p className="text-[11px] text-gray-500 text-right">
+                                без скидок: {formatAmount(total)} р · скидка гостей: −{formatAmount(total - totalWithDiscounts)} р
+                            </p>
+                        )}
                     </div>
 
                     {/* Комментарий к заказу */}

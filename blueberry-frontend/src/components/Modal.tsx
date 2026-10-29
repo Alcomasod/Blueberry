@@ -7,7 +7,7 @@ interface ModalProps {
     onClose: () => void;
     title: string;
     children: React.ReactNode; // Используем React.ReactNode вместо прямого импорта
-    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
+    size?: 'sm' | 'md' | 'lg' | 'xl' | 'wide' | 'full';
 }
 
 const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
@@ -15,6 +15,8 @@ const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
     md: 'max-w-md',
     lg: 'max-w-2xl',
     xl: 'max-w-5xl',
+    // Широкий контейнер для модалки заказа с боковым каталогом меню (70% экрана)
+    wide: 'w-[70vw] max-w-[1100px] max-h-[94vh]',
     full: 'w-[min(1600px,96vw)] max-h-[94vh]',
 };
 
