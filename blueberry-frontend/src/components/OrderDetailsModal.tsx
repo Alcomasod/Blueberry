@@ -305,12 +305,13 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
     // ===== Секция «Гости за столом»: раздельный счёт и персональные скидки =====
     const guestsSection = (
-        <div className="rounded-md border border-gray-200 p-3">
+        <div className="rounded-md border border-gray-200 p-3" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-1.5">
                     <Users size={15} /> Гости за столом ({guests.length}/{MAX_GUESTS})
                 </h3>
                 <button
+                    type="button"
                     onClick={handleAddGuest}
                     disabled={guests.length >= MAX_GUESTS || guestBusy}
                     title={guests.length >= MAX_GUESTS ? `Максимум ${MAX_GUESTS} гостей` : 'Добавить гостя'}
@@ -335,6 +336,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                             >
                                 <div className="flex items-center gap-2">
                                     <button
+                                      type="button"
                                       onClick={() => setActiveGuestId(isActive ? null : g.id)}
                                       title={isActive ? 'Выключить: блюда добавляются в общий список' : 'Включить: новые блюда оформляются на этого гостя'}
                                       className={`shrink-0 w-2.5 h-2.5 rounded-full border ${isActive ? 'bg-blueberry-600 border-blueberry-600' : 'bg-white border-gray-400'}`}
@@ -372,7 +374,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                                             <b>{formatAmount(Number(g.items_total))} р</b>
                                         )}
                                     </span>
-                                    <button onClick={() => handleRemoveGuest(g)} className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0" title="Удалить гостя (позиции станут общими)">
+                                    <button type="button" onClick={() => handleRemoveGuest(g)} className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0" title="Удалить гостя (позиции станут общими)">
                                         <X size={14} />
                                     </button>
                                 </div>
@@ -394,7 +396,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            size="lg"
+            size="xl"
             title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'}
         >
             {loading ? (
@@ -411,7 +413,28 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-2">Позиции</h3>
                         {order && order.items.length > 0 ? (
                             <ul className="divide-y divide-gray-100">
-                                {order.items.map((it) => (
+                                {(() => {
+                                    // Группировка позиций по гостям (item 3): секция на гостя + общие позиции
+                                    const sections: Array<{ key: string; title: string; items: OrderItem[] }> = [];
+                                    if (guests.length > 0) {
+                                        guests.forEach((g, gi) => {
+                                            const gItems = order.items.filter((i) => i.guest_id === g.id);
+                                            if (gItems.length > 0) {
+                                                sections.push({ key: `g-${g.id}`, title: guestLabel(g, gi), items: gItems });
+                                            }
+                                        });
+                                        const shared = order.items.filter((i) => !i.guest_id);
+                                        if (shared.length > 0) sections.push({ key: 'shared', title: 'Общие позиции', items: shared });
+                                    } else {
+                                        sections.push({ key: 'all', title: '', items: order.items });
+                                    }
+                                    return sections.map((sec) => (
+                                <li key={sec.key} className="py-2">
+                                {sec.title ? (
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">{sec.title}</p>
+                                ) : null}
+                                <ul className="divide-y divide-gray-50">
+                                {sec.items.map((it) => (
                                     <li key={it.id} className="py-2 flex items-center gap-2">
                                         <span className="flex-1 text-sm min-w-0">
                                             {it.item_name}
@@ -434,9 +457,13 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                                         <span className="w-8 text-center text-sm font-medium">{it.quantity}</span>
                                         <button onClick={() => handleQtyChange(it.id, 1)} className="p-1 rounded hover:bg-gray-100"><Plus size={14} /></button>
                                         <span className="w-20 text-right text-sm">{formatAmount(Number(it.line_total))} р</span>
-                                        <button onClick={() => handleRemoveItem(it.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
+                                        <button type="button" onClick={() => handleRemoveItem(it.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 size={14} /></button>
                                     </li>
                                 ))}
+                                </ul>
+                                </li>
+                                    ));
+                                })()}
                             </ul>
                         ) : (
                             <p className="text-sm text-gray-400">Позиций пока нет — добавьте блюда из каталога.</p>
@@ -495,7 +522,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                                 {visibleCategories.map((cat) => (
                                     <div key={cat.key}>
                                         <p className="text-xs font-semibold text-gray-500 mb-1">{cat.name}</p>
-                                        <div className="grid grid-cols-2 gap-1">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1">
                                             {cat.items.map((mi) => (
                                                 <button
                                                     key={mi.id}

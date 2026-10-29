@@ -6,7 +6,7 @@ import { useAuthStore } from '../store/authStore';
 import OrderDetailsModal from '../components/OrderDetailsModal';
 import PaymentModal from '../components/PaymentModal';
 import {
-    Users, CheckCircle, XCircle, Clock, RefreshCw,
+    CheckCircle, XCircle, Clock, RefreshCw,
     Plus, Trash2, Edit
 } from 'lucide-react';
 import Modal from '../components/Modal';
@@ -463,10 +463,6 @@ const TablesPage = () => {
                                                 <span className="text-2xl font-bold">#{table.number}</span>
                                                 {getStatusIcon(table.status)}
                                             </div>
-                                            <div className="flex items-center gap-1 text-sm opacity-80">
-                                                <Users size={14} />
-                                                <span>{table.capacity} мест</span>
-                                            </div>
                                             <div className="mt-2 text-xs font-medium uppercase tracking-wide">
                                                 {getStatusText(table.status)}
                                             </div>
@@ -486,10 +482,6 @@ const TablesPage = () => {
                         <div className="flex justify-between border-b pb-2">
                             <span className="text-gray-600">Зона:</span>
                             <span className="font-medium">{selectedTable.zone_name}</span>
-                        </div>
-                        <div className="flex justify-between border-b pb-2">
-                            <span className="text-gray-600">Вместимость:</span>
-                            <span className="font-medium">{selectedTable.capacity} чел.</span>
                         </div>
                         <div className="flex justify-between border-b pb-2">
                             <span className="text-gray-600">Статус:</span>
