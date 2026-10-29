@@ -175,14 +175,17 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
             const created = res.data?.data as OrderGuest | undefined;
             // Обновляем список гостей локально — без полного перезапроса,
             // чтобы исключён риск «белого экрана» при рассинхроне состояния
+            const defaultName = `Гость ${guests.length + 1}`;
             const newList: OrderGuest[] = created
-                ? [...guests, created]
+                ? [...guests, { ...created, name: created.name?.trim() || defaultName }]
                 : [...guests, {
-                    id: Date.now(), order_id: orderId, name: `Гость ${guests.length + 1}`,
+                    id: Date.now(), order_id: orderId, name: defaultName,
                     discount_percent: 0, items_total: '0', discount_amount: '0', to_pay: '0', items_count: 0,
                 }];
             setGuests(newList);
-            if (created?.id) setActiveGuestId(created.id);
+            // Новый гость всегда становится активным (выделение нельзя снять)
+            const newId = created?.id ?? newList[newList.length - 1].id;
+            setActiveGuestId(newId);
             // Фоновая синхронизация (несёт актуальные суммы); ошибки не блокируют UI
             try { await fetchData(); } catch { /* ignore */ }
         } catch (err) {
@@ -355,8 +358,8 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         return (
                             <div
                                 key={g.id}
-                                onClick={() => setActiveGuestId(isActive ? null : g.id)}
-                                title={isActive ? 'Клик — выключить: блюда добавляются в общий список' : 'Клик — выбрать гостя: новые блюда оформляются на него'}
+                                onClick={() => setActiveGuestId(g.id)}
+                                title="Клик — выбрать гостя: новые блюда оформляются на него"
                                 className={`cursor-pointer select-none rounded-md border p-2 transition hover:border-blueberry-400 hover:bg-blueberry-50/40 ${isActive ? 'border-blueberry-500 bg-blueberry-50/60 ring-1 ring-blueberry-200' : 'border-gray-200'}`}
                             >
                                 <div className="flex items-center gap-2">
