@@ -151,7 +151,8 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
             await api.post(`/orders/${orderId}/items`, {
                 menu_item_id: item.id,
                 quantity: 1,
-                guest_id: guestId ?? undefined,
+                // null явно означает «общая позиция» (undefined бэкенд трактует как «не менять»)
+                guest_id: guestId === null ? null : guestId,
             });
             await fetchData();
         } catch (err) {
@@ -162,17 +163,28 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     // ===== Гости за столом (раздельный счёт, персональные скидки) =====
     const guestLabel = (g: OrderGuest, idx: number) => g.name?.trim() || `Гость ${idx + 1}`;
 
-    const handleAddGuest = async (e?: React.MouseEvent) => {
-        // Защита от дефолтного поведения формы (переход браузера на /api/tables)
+    const handleAddGuest = async (e?: React.MouseEvent<HTMLButtonElement>) => {
+        // Полная защита от дефолтного поведения формы:
+        // без preventDefault браузер отправляет GET-запрос формы и переходит на /api/tables
         e?.preventDefault();
         e?.stopPropagation();
-        if (guests.length >= MAX_GUESTS) return;
+        if (guests.length >= MAX_GUESTS || guestBusy) return;
         setGuestBusy(true);
         try {
             const res = await api.post(`/orders/${orderId}/guests`, {});
-            const newId = (res.data.data as OrderGuest)?.id ?? null;
-            if (newId) setActiveGuestId(newId);
-            await fetchData();
+            const created = res.data?.data as OrderGuest | undefined;
+            // Обновляем список гостей локально — без полного перезапроса,
+            // чтобы исключён риск «белого экрана» при рассинхроне состояния
+            const newList: OrderGuest[] = created
+                ? [...guests, created]
+                : [...guests, {
+                    id: Date.now(), order_id: orderId, name: `Гость ${guests.length + 1}`,
+                    discount_percent: 0, items_total: '0', discount_amount: '0', to_pay: '0', items_count: 0,
+                }];
+            setGuests(newList);
+            if (created?.id) setActiveGuestId(created.id);
+            // Фоновая синхронизация (несёт актуальные суммы); ошибки не блокируют UI
+            try { await fetchData(); } catch { /* ignore */ }
         } catch (err) {
             alert(getApiErrorMessage(err, 'Не удалось добавить гостя'));
         } finally {
