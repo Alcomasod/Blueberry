@@ -307,14 +307,32 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     };
 
     const fetchHistory = async () => {
-        setShowHistory((v) => !v);
-        if (history.length === 0) {
-            try {
-                const res = await api.get(`/orders/${orderId}/history`);
-                setHistory(res.data.data as OrderHistoryEntry[]);
-            } catch (err) {
-                alert(getApiErrorMessage(err, 'История недоступна'));
+        // Повторное нажатие скрывает блок истории
+        if (showHistory) {
+            setShowHistory(false);
+            return;
+        }
+        setShowHistory(true);
+        await loadHistory();
+    };
+
+    // Загрузка журнала изменений: сначала отдельный эндпоинт, при 404 — из деталей заказа
+    const loadHistory = async () => {
+        try {
+            const res = await api.get(`/orders/${orderId}/history`);
+            setHistory((res.data.data as OrderHistoryEntry[]) ?? []);
+        } catch (err) {
+            const status = (err as { response?: { status?: number } })?.response?.status;
+            if (status === 404) {
+                // Старые сборки бэкенда: история приходит внутри GET /orders/:id
+                try {
+                    const dRes = await api.get(`/orders/${orderId}`);
+                    const d = dRes.data.data as Order & { history?: OrderHistoryEntry[] };
+                    setHistory(d.history ?? []);
+                    return;
+                } catch { /* показываем пустой список */ }
             }
+            setHistory([]);
         }
     };
 
@@ -613,16 +631,32 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
                     {/* История изменений */}
                     {showHistory && (
-                        <div className="border border-gray-200 rounded-md p-3 max-h-48 overflow-y-auto">
-                            <h3 className="text-xs font-semibold uppercase text-gray-500 mb-2">История изменений</h3>
-                            <ol className="space-y-1">
-                                {history.map((h) => (
-                                    <li key={h.id} className="text-xs text-gray-600">
-                                        <span className="font-mono">{new Date(h.created_at).toLocaleTimeString('ru-RU')}</span>{' '}
-                                        <b>{h.author}</b>: {h.details}
-                                    </li>
-                                ))}
-                            </ol>
+                        <div className="border border-gray-200 rounded-md p-3 max-h-64 overflow-y-auto">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">История изменений</h3>
+                                <button
+                                    type="button"
+                                    onClick={loadHistory}
+                                    title="Обновить журнал"
+                                    className="flex items-center gap-1 text-xs text-blueberry-700 hover:text-blueberry-900"
+                                >
+                                    <History size={12} /> Обновить
+                                </button>
+                            </div>
+                            {history.length === 0 ? (
+                                <p className="text-xs text-gray-400 italic">Изменений пока не зафиксировано</p>
+                            ) : (
+                                <ol className="space-y-1.5">
+                                    {history.map((h) => (
+                                        <li key={h.id} className="text-xs text-gray-600 flex gap-2">
+                                            <span className="font-mono shrink-0 text-gray-400">
+                                                {new Date(h.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                            <span><b>{h.author}</b>: {h.details}</span>
+                                        </li>
+                                    ))}
+                                </ol>
+                            )}
                         </div>
                     )}
 

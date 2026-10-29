@@ -10,6 +10,7 @@ import {
     handleUpdateOrderComment,
     handleGetOrders,       // <-- ИСПОЛЬЗУЕМ НОВОЕ ИМЯ
     handleGetOrderDetails,
+    handleGetOrderHistory,
     handleGetOrderGuests,
     handleAddOrderGuest,
     handleUpdateOrderGuest,
@@ -26,6 +27,9 @@ router.get('/my', handleGetOrders);
 
 // GET /api/orders/:id - Получить детали конкретного заказа
 router.get('/:id', handleGetOrderDetails);
+
+// GET /api/orders/:id/history - Журнал изменений заказа (кнопка «История»)
+router.get('/:id/history', handleGetOrderHistory);
 
 // POST /api/orders - Создать новый заказ
 router.post('/', handleCreateOrder);

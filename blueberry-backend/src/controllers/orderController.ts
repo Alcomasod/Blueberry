@@ -14,6 +14,7 @@ import {
     updateOrderGuest,
     removeOrderGuest,
     getOrderGuests,
+    getOrderHistory,
     MAX_GUESTS_PER_ORDER
 } from '../services/orderService.js';
 import { getActiveShift } from '../services/shiftService.js';
@@ -58,6 +59,23 @@ export async function handleGetOrders(req: Request, res: Response) {
 // ==========================================
 // ДЕТАЛИ ЗАКАЗА
 // ==========================================
+
+// GET /api/orders/:id/history — журнал изменений заказа (кнопка «История»)
+export async function handleGetOrderHistory(req: Request, res: Response) {
+    const waiterId = req.user?.id;
+    const role = req.user?.role;
+    if (!waiterId || !role) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+    }
+    const { id } = req.params;
+    try {
+        const history = await getOrderHistory(parseInt(id, 10));
+        res.json({ success: true, data: history });
+    } catch (error) {
+        console.error('Error fetching order history:', error);
+        res.status(400).json({ success: false, error: (error as Error).message });
+    }
+}
 
 export async function handleGetOrderDetails(req: Request, res: Response) {
     const waiterId = req.user?.id;

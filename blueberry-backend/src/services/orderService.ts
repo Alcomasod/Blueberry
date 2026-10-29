@@ -748,6 +748,25 @@ export async function getOrdersByRole(
 // ДЕТАЛИ ЗАКАЗА
 // ==========================================
 
+// Отдельный запрос журнала изменений заказа (кнопка «История» в модалке).
+// Возвращает пустой список при отсутствии таблицы/колонок (старые схемы) — не роняем запрос.
+export async function getOrderHistory(orderId: number) {
+    try {
+        const res = await pool.query(`
+            SELECT oh.id, oh.action, oh.details, oh.created_at,
+                   COALESCE(u.full_name, 'Система') as author
+            FROM order_history oh
+                     LEFT JOIN users u ON oh.user_id = u.id
+            WHERE oh.order_id = $1
+            ORDER BY oh.created_at DESC, oh.id DESC
+        `, [orderId]);
+        return res.rows;
+    } catch (err) {
+        console.warn('getOrderHistory fallback:', (err as Error).message);
+        return [];
+    }
+}
+
 export async function getOrderDetails(orderId: number, userRole: string, userId: number) {
     // Любой авторизованный сотрудник может открыть детали открытого заказа
     // (официант «подхватывает» стол прямо из карточки). Оплаченные/отменённые
