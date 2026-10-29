@@ -92,7 +92,15 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
             // список гостей (старые сборки бэкенда могут не иметь эндпоинта — не блокируем работу)
             try {
                 const gRes = await api.get(`/orders/${orderId}/guests`);
-                const list = (gRes.data.data?.guests ?? []) as OrderGuest[];
+                let list = (gRes.data.data?.guests ?? []) as OrderGuest[];
+                // При открытии заказа хотя бы один гость должен присутствовать всегда
+                if (list.length === 0) {
+                    try {
+                        await api.post(`/orders/${orderId}/guests`, {});
+                        const gRes2 = await api.get(`/orders/${orderId}/guests`);
+                        list = (gRes2.data.data?.guests ?? []) as OrderGuest[];
+                    } catch { /* не блокируем работу модалки */ }
+                }
                 setGuests(list);
                 setActiveGuestId((prev) => (prev && list.some((g) => g.id === prev) ? prev : (list[0]?.id ?? null)));
             } catch {
@@ -154,7 +162,10 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
     // ===== Гости за столом (раздельный счёт, персональные скидки) =====
     const guestLabel = (g: OrderGuest, idx: number) => g.name?.trim() || `Гость ${idx + 1}`;
 
-    const handleAddGuest = async () => {
+    const handleAddGuest = async (e?: React.MouseEvent) => {
+        // Защита от дефолтного поведения формы (переход браузера на /api/tables)
+        e?.preventDefault();
+        e?.stopPropagation();
         if (guests.length >= MAX_GUESTS) return;
         setGuestBusy(true);
         try {
@@ -392,11 +403,67 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         </div>
     );
 
+    // ===== Макет: слева — карточка заказа, справа — каталог меню (при открытом «Добавить блюдо») =====
+    const catalogPanel = showAddPanel ? (
+        <div className="border border-gray-200 rounded-md p-3 space-y-3 bg-gray-50/60">
+            {guests.length > 0 && (
+                <p className="text-xs text-gray-500">
+                    Новые блюда оформляются на: <b className="text-blueberry-700">{activeGuestId ? guestLabel(guests.find((g) => g.id === activeGuestId)!, guests.findIndex((g) => g.id === activeGuestId)) : 'общий счёт'}</b> — выберите гостя в блоке «Гости за столом», чтобы привязать заказ к конкретному человеку.
+                </p>
+            )}
+            <div className="relative">
+                <Search size={16} className="absolute left-2 top-2.5 text-gray-400" />
+                <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Поиск по меню…"
+                    className="w-full rounded-md border border-gray-300 pl-8 pr-3 py-2 text-sm"
+                />
+            </div>
+            <div className="flex flex-wrap gap-1">
+                <button
+                    type="button"
+                    onClick={() => setActiveCategory('all')}
+                    className={`px-2 py-1 rounded-full text-xs ${activeCategory === 'all' ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                >Все</button>
+                {catalog.map((c) => (
+                    <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setActiveCategory(c.key)}
+                        className={`px-2 py-1 rounded-full text-xs ${activeCategory === c.key ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                    >{c.name}</button>
+                ))}
+            </div>
+            <div className="max-h-[calc(90vh-14rem)] overflow-y-auto space-y-3">
+                {visibleCategories.map((cat) => (
+                    <div key={cat.key}>
+                        <p className="text-xs font-semibold text-gray-500 mb-1">{cat.name}</p>
+                        <div className="grid grid-cols-1 gap-1">
+                            {cat.items.map((mi) => (
+                                <button
+                                    key={mi.id}
+                                    type="button"
+                                    onClick={() => handleAddItem(mi, activeGuestId)}
+                                    title={mi.composition ? `Состав: ${mi.composition}` : undefined}
+                                    className="text-left px-2 py-1.5 rounded hover:bg-blueberry-50 text-sm flex justify-between gap-2"
+                                >
+                                    <span className="truncate">{mi.name}</span>
+                                    <span className="text-gray-500 shrink-0">{formatAmount(mi.price)} р</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    ) : null;
+
     return (
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            size="xl"
+            size={showAddPanel ? 'full' : 'xl'}
             title={order ? `Заказ №${order.id} · Стол ${order.table_number} (${order.zone_name})` : 'Заказ'}
         >
             {loading ? (
@@ -404,7 +471,11 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     <Loader2 className="animate-spin text-blueberry-600" size={32} />
                 </div>
             ) : (
-                <div className="space-y-4">
+                <div className={showAddPanel ? 'flex gap-4 items-start' : 'space-y-4'}>
+                <form
+                    className={showAddPanel ? 'flex-1 min-w-0 space-y-4' : 'space-y-4'}
+                    onSubmit={(e) => { e.preventDefault(); handleSaveOrder({ closeAfter: false }); }}
+                >
                     {/* Гости за столом */}
                     {guestsSection}
 
@@ -488,59 +559,6 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         />
                     </div>
 
-                    {/* Каталог добавления позиции */}
-                    {showAddPanel && (
-                        <div className="border border-gray-200 rounded-md p-3 space-y-3">
-                            {guests.length > 0 && (
-                                <p className="text-xs text-gray-500">
-                                    Новые блюда оформляются на: <b className="text-blueberry-700">{activeGuestId ? guestLabel(guests.find((g) => g.id === activeGuestId)!, guests.findIndex((g) => g.id === activeGuestId)) : 'общий счёт'}</b> — выберите гостя в блоке «Гости за столом», чтобы привязать заказ к конкретному человеку.
-                                </p>
-                            )}
-                            <div className="relative">
-                                <Search size={16} className="absolute left-2 top-2.5 text-gray-400" />
-                                <input
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                    placeholder="Поиск по меню…"
-                                    className="w-full rounded-md border border-gray-300 pl-8 pr-3 py-2 text-sm"
-                                />
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                                <button
-                                    onClick={() => setActiveCategory('all')}
-                                    className={`px-2 py-1 rounded-full text-xs ${activeCategory === 'all' ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                                >Все</button>
-                                {catalog.map((c) => (
-                                    <button
-                                        key={c.key}
-                                        onClick={() => setActiveCategory(c.key)}
-                                        className={`px-2 py-1 rounded-full text-xs ${activeCategory === c.key ? 'bg-blueberry-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-                                    >{c.name}</button>
-                                ))}
-                            </div>
-                            <div className="max-h-56 overflow-y-auto space-y-3">
-                                {visibleCategories.map((cat) => (
-                                    <div key={cat.key}>
-                                        <p className="text-xs font-semibold text-gray-500 mb-1">{cat.name}</p>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1">
-                                            {cat.items.map((mi) => (
-                                                <button
-                                                    key={mi.id}
-                                                    onClick={() => handleAddItem(mi, activeGuestId)}
-                                                    title={mi.composition ? `Состав: ${mi.composition}` : undefined}
-                                                    className="text-left px-2 py-1.5 rounded hover:bg-blueberry-50 text-sm flex justify-between gap-2"
-                                                >
-                                                    <span className="truncate">{mi.name}</span>
-                                                    <span className="text-gray-500 shrink-0">{formatAmount(mi.price)} р</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
                     {/* История изменений */}
                     {showHistory && (
                         <div className="border border-gray-200 rounded-md p-3 max-h-48 overflow-y-auto">
@@ -558,6 +576,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
                     {/* Большая кнопка СОХРАНИТЬ (активна всегда) */}
                     <button
+                        type="submit"
                         onClick={() => handleSaveOrder()}
                         disabled={saving}
                         className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blueberry-600 text-white text-base font-bold rounded-lg hover:bg-blueberry-700 transition disabled:opacity-50"
@@ -576,16 +595,24 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
                     {/* Ряд дополнительных действий */}
                     <div className="flex gap-2">
-                        <button onClick={fetchHistory} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm">
+                        <button type="button" onClick={fetchHistory} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm">
                             <History size={16} /> История
                         </button>
-                        <button onClick={() => setShowAddPanel((v) => !v)} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-green-100 text-green-800 hover:bg-green-200 text-sm">
-                            <Plus size={16} /> Добавить блюдо
+                        <button type="button" onClick={() => setShowAddPanel((v) => !v)} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-green-100 text-green-800 hover:bg-green-200 text-sm">
+                            <Plus size={16} /> {showAddPanel ? 'Скрыть меню' : 'Добавить блюдо'}
                         </button>
-                        <button onClick={handlePayOrder} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-blueberry-100 text-blueberry-800 hover:bg-blueberry-200 text-sm">
+                        <button type="button" onClick={handlePayOrder} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-blueberry-100 text-blueberry-800 hover:bg-blueberry-200 text-sm">
                             <CreditCard size={16} /> Оплатить
                         </button>
                     </div>
+                </form>
+
+                {/* Каталог меню — справа от основной карточки заказа */}
+                {catalogPanel && (
+                    <div className="w-[400px] shrink-0 sticky top-0" onClick={(e) => e.stopPropagation()}>
+                        {catalogPanel}
+                    </div>
+                )}
                 </div>
             )}
 

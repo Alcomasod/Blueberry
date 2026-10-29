@@ -7,7 +7,7 @@ interface ModalProps {
     onClose: () => void;
     title: string;
     children: React.ReactNode; // Используем React.ReactNode вместо прямого импорта
-    size?: 'sm' | 'md' | 'lg' | 'xl';
+    size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
 }
 
 const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
@@ -15,6 +15,7 @@ const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
     md: 'max-w-md',
     lg: 'max-w-2xl',
     xl: 'max-w-5xl',
+    full: 'w-[min(1600px,96vw)] max-h-[94vh]',
 };
 
 const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) => {

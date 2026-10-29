@@ -256,6 +256,13 @@ export async function createOrder(
         const order = orderResult.rows[0];
         await logOrderHistory(client, order.id, waiterId, 'created', 'Заказ создан');
 
+        // При создании заказа сразу добавляем «Гость 1» — заказ открывается,
+        // когда за столом уже кто-то сидит. Дальше официант добавляет гостей вручную.
+        const existingGuests = await client.query(`SELECT COUNT(*)::int AS cnt FROM order_guests WHERE order_id = $1`, [order.id]);
+        if (existingGuests.rows[0].cnt === 0) {
+            await client.query(`INSERT INTO order_guests (order_id, name) VALUES ($1, 'Гость 1')`, [order.id]);
+        }
+
         const addRes = await addItemsToOrderTx(client, order.id, waiterId, items);
 
         await client.query(`UPDATE orders SET total_amount = $1 WHERE id = $2`, [addRes.total, order.id]);
