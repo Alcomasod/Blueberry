@@ -355,31 +355,43 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                         return (
                             <div
                                 key={g.id}
-                                className={`rounded-md border p-2 transition ${isActive ? 'border-blueberry-500 bg-blueberry-50/60 ring-1 ring-blueberry-200' : 'border-gray-200'}`}
+                                onClick={() => setActiveGuestId(isActive ? null : g.id)}
+                                title={isActive ? 'Клик — выключить: блюда добавляются в общий список' : 'Клик — выбрать гостя: новые блюда оформляются на него'}
+                                className={`cursor-pointer select-none rounded-md border p-2 transition hover:border-blueberry-400 hover:bg-blueberry-50/40 ${isActive ? 'border-blueberry-500 bg-blueberry-50/60 ring-1 ring-blueberry-200' : 'border-gray-200'}`}
                             >
                                 <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveGuestId(isActive ? null : g.id)}
-                                      title={isActive ? 'Выключить: блюда добавляются в общий список' : 'Включить: новые блюда оформляются на этого гостя'}
-                                      className={`shrink-0 w-2.5 h-2.5 rounded-full border ${isActive ? 'bg-blueberry-600 border-blueberry-600' : 'bg-white border-gray-400'}`}
-                                    />
-                                    <input
-                                        defaultValue={g.name ?? ''}
-                                        placeholder={guestLabel(g, idx)}
-                                        onBlur={(e) => {
-                                            const v = e.target.value.trim();
-                                            if (v !== (g.name ?? '')) handleRenameGuest(g, v);
-                                        }}
-                                        className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium hover:border-gray-300 focus:border-blueberry-500 focus:ring-1 focus:ring-blueberry-500 focus:bg-white outline-none"
-                                    />
+                                    <span
+                                        aria-hidden
+                                        className={`shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center transition ${isActive ? 'bg-blueberry-600 border-blueberry-600' : 'bg-white border-gray-400'}`}
+                                    >
+                                        {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                    </span>
+                                    {/* Клик по имени выбирает гостя; нативное редактирование — только по двойному клику */}
+                                    <div
+                                        className="min-w-0 max-w-[8rem] flex-1"
+                                        onClick={(e) => { e.stopPropagation(); setActiveGuestId(g.id); }}
+                                    >
+                                        <input
+                                            defaultValue={g.name ?? ''}
+                                            placeholder={guestLabel(g, idx)}
+                                            onFocus={(e) => e.target.select()}
+                                            onBlur={(e) => {
+                                                const v = e.target.value.trim();
+                                                if (v !== (g.name ?? '')) handleRenameGuest(g, v);
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onMouseDown={(e) => { if (e.detail < 2) e.preventDefault(); }}
+                                            className="w-full min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium hover:border-gray-300 focus:border-blueberry-500 focus:ring-1 focus:ring-blueberry-500 focus:bg-white outline-none"
+                                        />
+                                    </div>
                                     <span className="text-[11px] text-gray-500 shrink-0">{g.items_count} поз.</span>
-                                    <label className="flex items-center gap-1 text-xs text-gray-600 shrink-0" title="Персональная скидка, %">
+                                    <label className="flex items-center gap-1 text-xs text-gray-600 shrink-0" title="Персональная скидка, %" onClick={(e) => e.stopPropagation()}>
                                         Скидка
                                         <input
                                             type="number"
                                             min={0}
                                             max={100}
+                                            onMouseDown={(e) => e.stopPropagation()}
                                             value={g.discount_percent}
                                             onChange={(e) => setGuests((prev) => prev.map((x) => (x.id === g.id ? { ...x, discount_percent: parseInt(e.target.value, 10) || 0 } : x)))}
                                             onBlur={(e) => handleDiscountChange(g, parseInt(e.target.value, 10) || 0)}
@@ -397,7 +409,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                                             <b>{formatAmount(Number(g.items_total))} р</b>
                                         )}
                                     </span>
-                                    <button type="button" onClick={() => handleRemoveGuest(g)} className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0" title="Удалить гостя (позиции станут общими)">
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); handleRemoveGuest(g); }} className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0" title="Удалить гостя (позиции станут общими)">
                                         <X size={14} />
                                     </button>
                                 </div>
