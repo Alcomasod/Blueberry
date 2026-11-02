@@ -22,6 +22,8 @@ interface ActiveShift {
     id: number;
     start_time: string;
     shift_date: string;
+    end_time?: string | null;
+    status?: string;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -295,7 +297,7 @@ export default function ProfilePage() {
             <div className={cardCls}>
                 <h2 className="text-lg font-semibold text-gray-800">О системе</h2>
                 <p className="text-sm text-gray-500">
-                    {branding.appName ?? 'Blueberry'} CRM · версия сборки уточняется по{' '}
+                    {branding.name ?? 'Blueberry'} CRM · версия сборки уточняется по{' '}
                     <code className="bg-gray-100 px-1 rounded">GET /api/_build-info</code>
                 </p>
             </div>

@@ -11,6 +11,7 @@ import DashboardPage from "./pages/DashboardPage.tsx";
 
 import MenuPage from './pages/MenuPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import ProfilePage from './pages/ProfilePage';
 const UsersPage = () => <h1 className="text-3xl font-bold text-gray-800">Сотрудники</h1>;
 const SettingsPage = () => <h1 className="text-3xl font-bold text-gray-800">Настройки</h1>;
 
@@ -32,6 +33,7 @@ function App() {
                         <Route path="/menu" element={<MenuPage />} />
                         <Route path="/users" element={<UsersPage />} />
                         <Route path="/analytics" element={<AnalyticsPage />} />
+                        <Route path="/profile" element={<ProfilePage />} />
                         <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                 </Route>

@@ -7,6 +7,7 @@ import {
     Users,
     BarChart3,
     Settings,
+    UserCircle,
     LogOut
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -28,6 +29,7 @@ const menuItems: MenuItem[] = [
     { label: 'Меню', path: '/menu', icon: <BookOpen size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter'] },
     { label: 'Сотрудники', path: '/users', icon: <Users size={20} />, roles: ['sys_admin', 'director', 'admin'] },
     { label: 'Аналитика', path: '/analytics', icon: <BarChart3 size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter', 'kitchen', 'hookah_master', 'hookah_bar'] },
+    { label: 'Профиль', path: '/profile', icon: <UserCircle size={20} />, roles: ['sys_admin', 'director', 'admin', 'waiter', 'kitchen', 'hookah_master', 'hookah_bar'] },
     { label: 'Настройки', path: '/settings', icon: <Settings size={20} />, roles: ['sys_admin'] },
 ];
 
