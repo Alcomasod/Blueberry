@@ -26,6 +26,7 @@ import hookahOrderRoutes from './routes/hookahOrderRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import incidentRoutes from './routes/incidentRoutes.js';
 import announcementRoutes from './routes/announcementRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
 
 dotenv.config();
 
@@ -164,6 +165,9 @@ app.use('/api/incidents', authenticateToken, incidentRoutes);
 // (двойной слэш в baseURL + путь) не матчатся и получают 404.
 app.use('/api/announcements', authenticateToken, announcementRoutes);
 app.use('/api/announcements/', authenticateToken, announcementRoutes);
+
+// Профиль сотрудника: доступен всем авторизованным (self-service)
+app.use('/api/profile', authenticateToken, profileRoutes);
 
 // ==========================================
 // СТАТИКА ФРОНТЕНДА (единый контейнер)

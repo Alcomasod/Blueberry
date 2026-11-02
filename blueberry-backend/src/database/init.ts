@@ -285,6 +285,13 @@ export async function initDatabase() {
         // Аналитика: привязка оплаченного заказа к закрытой смене (для расчёта часов по фактическим сменам)
         await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift_id INT REFERENCES shifts(id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_shift ON orders(shift_id)`);
+
+        // --- Профиль сотрудника ---
+        // Контактные поля для self-service редактирования на странице /profile
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(100)`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(50)`);
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hired_at DATE`);
         console.log('✅ Blueberry: Миграции схемы меню и заказов применены (menu_items.composition, orders.comment, order_guests, order_items.guest_id).');
 
         // Страховка от NULL-флагов у старых seed-строк
