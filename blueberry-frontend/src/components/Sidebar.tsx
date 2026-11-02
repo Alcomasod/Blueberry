@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import ShiftButton from './ShiftButton';
+import { theme } from '../theme';
 
 // Определяем структуру пунктов меню
 interface MenuItem {
@@ -46,10 +47,10 @@ const Sidebar = () => {
     };
 
     return (
-        <div className="flex h-screen w-64 flex-col bg-blueberry-900 text-white shadow-xl">
-            {/* Логотип */}
+        <div className={`flex h-screen ${theme.branding.sidebarWidth} flex-col bg-blueberry-900 text-white shadow-xl`}>
+            {/* Логотип (строка и ширина — theme.branding) */}
             <div className="flex h-16 items-center justify-center border-b border-blueberry-600">
-                <h1 className="text-2xl font-bold tracking-wider">🫐 Blueberry</h1>
+                <h1 className="text-2xl font-bold tracking-wider">{theme.branding.logoText}</h1>
             </div>
 
             {/* Информация о пользователе */}
@@ -94,11 +95,11 @@ const Sidebar = () => {
                 </ul>
             </nav>
 
-            {/* Кнопка выхода */}
-            <div className="border-t border-blueberry-600 p-4">
+            {/* Подвал сайдбара: кнопка выхода (стили — theme.footer) */}
+            <div className={theme.footer.container}>
                 <button
                     onClick={handleLogout}
-                    className="flex w-full items-center gap-3 rounded-lg px-4 py-2 text-blueberry-100 transition-colors hover:bg-red-600 hover:text-white"
+                    className={theme.footer.logoutButton}
                 >
                     <LogOut size={20} />
                     <span className="text-sm font-medium">Выйти</span>

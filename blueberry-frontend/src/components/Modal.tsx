@@ -1,6 +1,7 @@
 // src/components/Modal.tsx
 import React from 'react'; // Импортируем сам React
 import { X } from 'lucide-react';
+import { theme } from '../theme';
 
 interface ModalProps {
     isOpen: boolean;
@@ -10,31 +11,24 @@ interface ModalProps {
     size?: 'sm' | 'md' | 'lg' | 'xl' | 'wide' | 'full';
 }
 
-const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-2xl',
-    xl: 'max-w-5xl',
-    // Широкий контейнер для модалки заказа с боковым каталогом меню (70% экрана)
-    wide: 'w-[70vw] max-w-[1100px] max-h-[94vh]',
-    full: 'w-[min(1600px,96vw)] max-h-[94vh]',
-};
+// Размеры контейнеров модалок вынесены в дизайн-систему (src/theme.ts)
+const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = theme.modal.sizes;
 
 const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) => {
     if (!isOpen) return null;
 
     return (
         <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 backdrop-blur-sm"
+            className={theme.modal.overlay}
             onClick={onClose}
         >
             <div
-                className={`bg-white rounded-xl p-6 ${sizeClasses[size]} w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200`}
+                className={`${theme.modal.panel} ${sizeClasses[size]}`}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-gray-800">{title}</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+                    <h3 className={theme.modal.title}>{title}</h3>
+                    <button onClick={onClose} className={theme.modal.closeButton}>
                         <X size={24} />
                     </button>
                 </div>
