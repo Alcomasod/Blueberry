@@ -29,7 +29,8 @@ services:
       dockerfile: blueberry-backend/Dockerfile
     container_name: blueberry-app
     ports:
-      - "127.0.0.1:4000:3000"
+
+      - "127.0.0.1:4000:4000"
     environment:
       - NODE_ENV=production
       - PORT=3000
