@@ -399,9 +399,9 @@ const TablesPage = () => {
     return (
         <div className="space-y-6">
             {/* Заголовок и кнопки */}
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-gray-800"> Карта зала</h1>
-                <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h1 className="text-xl md:text-3xl font-bold text-gray-800"> Карта зала</h1>
+                <div className="flex flex-wrap gap-2">
                     {isAdmin && (
                         <>
                             <button onClick={() => setShowAddZoneModal(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition">
@@ -419,7 +419,7 @@ const TablesPage = () => {
             </div>
 
             {/* Легенда */}
-            <div className="flex gap-4 text-sm">
+            <div className="flex flex-wrap gap-3 sm:gap-4 text-sm">
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500 rounded-full"></div> Свободен</div>
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-full"></div> Занят</div>
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-yellow-500 rounded-full"></div> Бронь</div>
@@ -439,7 +439,7 @@ const TablesPage = () => {
                 sortedZones.map((zone) => {
                     const zoneTables = tablesByZoneId[zone.id] || [];
                     return (
-                        <div key={zone.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <div key={zone.id} className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200">
                             <div className="flex justify-between items-center mb-4 border-b pb-2">
                                 <h2 className="text-xl font-semibold text-gray-700">{zone.name}</h2>
                                 {isAdmin && (
@@ -452,7 +452,7 @@ const TablesPage = () => {
                             {zoneTables.length === 0 ? (
                                 <p className="text-gray-400 italic text-sm py-4">В этом зале пока нет столов</p>
                             ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4">
                                     {zoneTables.map((table) => (
                                         <button
                                             key={table.id}

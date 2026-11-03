@@ -493,7 +493,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     >{c.name}</button>
                 ))}
             </div>
-            <div className="max-h-[calc(90vh-14rem)] overflow-y-auto space-y-3">
+            <div className="max-h-[50vh] lg:max-h-[calc(90vh-14rem)] overflow-y-auto space-y-3">
                 {visibleCategories.map((cat) => (
                     <div key={cat.key}>
                         <p className="text-xs font-semibold text-gray-500 mb-1">{cat.name}</p>
@@ -529,7 +529,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     <Loader2 className="animate-spin text-blueberry-600" size={32} />
                 </div>
             ) : (
-                <div className={showAddPanel ? 'flex gap-4 items-start' : 'space-y-4'}>
+                <div className={showAddPanel ? 'flex flex-col gap-4 lg:flex-row lg:items-start' : 'space-y-4'}>
                 <form
                     className={showAddPanel ? 'flex-1 min-w-0 space-y-4' : 'space-y-4'}
                     onSubmit={(e) => { e.preventDefault(); handleSaveOrder({ closeAfter: false }); }}
@@ -680,7 +680,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     )}
 
                     {/* Ряд дополнительных действий */}
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={fetchHistory} className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm">
                             <History size={16} /> История
                         </button>
@@ -695,7 +695,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
 
                 {/* Каталог меню — справа от основной карточки заказа */}
                 {catalogPanel && (
-                    <div className="w-[400px] shrink-0 sticky top-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-full shrink-0 lg:w-[400px] lg:sticky lg:top-0" onClick={(e) => e.stopPropagation()}>
                         {catalogPanel}
                     </div>
                 )}

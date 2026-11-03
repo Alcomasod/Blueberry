@@ -38,7 +38,7 @@ const OrderDetailsPage = () => {
                     <ArrowLeft size={16} />
                     Назад к заказам
                 </button>
-                <h1 className="text-3xl font-bold text-gray-800">
+                <h1 className="text-xl md:text-3xl font-bold text-gray-800">
                     Заказ #{id}
                 </h1>
             </div>

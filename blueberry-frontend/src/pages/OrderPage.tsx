@@ -207,16 +207,16 @@ const OrdersPage = () => {
     return (
         <div className="space-y-6">
             {/* Заголовок и обновление */}
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-gray-800"> Управление заказами</h1>
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h1 className="text-xl md:text-3xl font-bold text-gray-800"> Управление заказами</h1>
                 <button onClick={fetchData} className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition">
                     <RefreshCw size={16} /> Обновить
                 </button>
             </div>
 
             {/* Панель фильтров */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center">
-                <div className="relative flex-1 min-w-[200px]">
+            <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-3 md:gap-4 items-center">
+                <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
                     <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
                     <input
                         type="text"

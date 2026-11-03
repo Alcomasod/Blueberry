@@ -23,11 +23,11 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
             onClick={onClose}
         >
             <div
-                className={`${theme.modal.panel} ${sizeClasses[size]}`}
+                className={`${theme.modal.panelResponsive} ${sizeClasses[size]}`}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className={theme.modal.title}>{title}</h3>
+                <div className="flex justify-between items-center gap-2 mb-4">
+                    <h3 className={`${theme.modal.title} truncate`}>{title}</h3>
                     <button onClick={onClose} className={theme.modal.closeButton}>
                         <X size={24} />
                     </button>

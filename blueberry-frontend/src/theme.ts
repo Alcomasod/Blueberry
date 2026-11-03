@@ -101,16 +101,35 @@ export const branding = {
     emoji: '🫐',
     /** Строка для шапки/сайдбара: "🫐 Blueberry" */
     logoText: '🫐 Blueberry',
-    sidebarWidth: 'w-64',
+    /** Ширина сайдбара на десктопе (lg+); на мобильных скрывается за бургер-меню */
+    sidebarWidth: 'w-full lg:w-64',
 } as const;
 
 // ─────────────────────────────────────────────
-// 7. СЕТКА / ОТСТУПЫ
+// 7. СЕТКА / ОТСТУПЫ (адаптив: меньше отступов на мобильных)
 // ─────────────────────────────────────────────
 export const spacing = {
-    pagePadding: 'p-8',        // основной контент страницы
-    cardPadding: 'p-6',        // модалки, карточки
-    blockGap: 'space-y-2',     // списки
+    pagePadding: 'p-3 md:p-6 lg:p-8',  // основной контент страницы
+    cardPadding: 'p-4 md:p-6',         // модалки, карточки
+    blockGap: 'space-y-2',             // списки
+} as const;
+
+// ─────────────────────────────────────────────
+// 7.1 АДАПТИВНАЯ ОБХОЛОЧКА (мобильные устройства)
+// ─────────────────────────────────────────────
+export const responsive = {
+    /** Заголовки страниц: крупный текст только на планшете и выше */
+    pageTitle: 'text-xl md:text-3xl font-bold text-gray-800',
+    /** Строка заголовка + кнопок: вертикально на мобильных, горизонтально на десктопе */
+    toolbar: 'flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3',
+    /** Панель фильтров/легенды */
+    filterBar: 'bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-3 md:gap-4 items-center',
+    /** Сайдбар вне экрана на мобильных (выезжает слева при открытии бургер-меню) */
+    sidebarHidden: '-translate-x-full lg:translate-x-0',
+    /** Затемнение фона под открытым мобильным меню */
+    menuOverlay: 'fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden',
+    /** Кнопка-бургер в шапке (видна только на мобильных) */
+    burgerButton: 'flex items-center justify-center rounded-md p-2 text-gray-600 hover:bg-gray-100 transition-colors lg:hidden',
 } as const;
 
 // ─────────────────────────────────────────────
@@ -153,7 +172,7 @@ export const badges = {
 // 11. ШАПКА САЙТА (header в Layout)
 // ─────────────────────────────────────────────
 export const header = {
-    container: 'flex items-center justify-end gap-3 px-8 py-3 bg-white border-b border-gray-200 shrink-0',
+    container: 'flex items-center justify-between gap-3 px-3 md:px-8 py-3 bg-white border-b border-gray-200 shrink-0',
     height: 'h-16',
 } as const;
 
@@ -174,14 +193,16 @@ export const modal = {
     panel: `bg-white ${radii.lg} ${spacing.cardPadding} w-full max-h-[90vh] overflow-y-auto ${shadows.modal} ${animations.fadeInZoom}`,
     title: 'text-xl font-bold text-gray-800',
     closeButton: buttons.icon,
+    /** Контейнер модалки: на мобильных занимает почти весь экран */
+    panelResponsive: `bg-white ${radii.lg} ${spacing.cardPadding} w-full max-w-full sm:max-h-[90vh] overflow-y-auto ${shadows.modal} ${animations.fadeInZoom}`,
     sizes: {
-        sm: 'max-w-sm',
-        md: 'max-w-md',
-        lg: 'max-w-2xl',
-        xl: 'max-w-5xl',
-        // Широкий контейнер для модалки заказа с боковым каталогом меню (70% экрана)
-        wide: 'w-[70vw] max-w-[1100px] max-h-[94vh]',
-        full: 'w-[min(1600px,96vw)] max-h-[94vh]',
+        sm: 'sm:max-w-sm',
+        md: 'sm:max-w-md',
+        lg: 'sm:max-w-2xl',
+        xl: 'sm:max-w-5xl',
+        // Широкий контейнер для модалки заказа с боковым каталогом меню (70% экрана на десктопе)
+        wide: 'lg:w-[70vw] lg:max-w-[1100px] sm:max-h-[94vh]',
+        full: 'lg:w-[min(1600px,96vw)] sm:max-h-[94vh]',
     },
 } as const;
 
@@ -199,7 +220,7 @@ export const toasts = {
 // 15. LAYOUT (общая оболочка приложения)
 // ─────────────────────────────────────────────
 export const layout = {
-    root: 'flex h-screen bg-gray-50',
+    root: 'flex min-h-screen bg-gray-50',
     main: `flex-1 overflow-y-auto ${spacing.pagePadding}`,
 } as const;
 
@@ -221,7 +242,7 @@ export const SHIFT_ROLES: string[] = [roles.waiter, roles.hookah_master, roles.h
 
 /** Единая точка выхода дизайн-токенов: import { theme } from '../theme' */
 export const theme = {
-    colors, typography, radii, shadows, animations, branding, spacing,
+    colors, typography, radii, shadows, animations, branding, spacing, responsive,
     buttons, cards, badges, header, footer, modal, toasts, layout, roles,
 } as const;
 

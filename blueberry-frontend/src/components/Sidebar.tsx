@@ -33,7 +33,7 @@ const menuItems: MenuItem[] = [
     { label: 'Настройки', path: '/settings', icon: <Settings size={20} />, roles: ['sys_admin'] },
 ];
 
-const Sidebar = () => {
+const Sidebar = ({ onCloseMobile }: { onCloseMobile?: () => void }) => {
     const { user, logout } = useAuthStore();
     const navigate = useNavigate();
     const location = useLocation();
@@ -48,15 +48,21 @@ const Sidebar = () => {
         navigate('/login');
     };
 
+    // Навигация + закрытие мобильного меню (на десктопе onCloseMobile — no-op)
+    const go = (path: string) => {
+        navigate(path);
+        onCloseMobile?.();
+    };
+
     return (
-        <div className={`flex h-screen ${theme.branding.sidebarWidth} flex-col bg-blueberry-900 text-white shadow-xl`}>
+        <div className={`flex h-screen lg:h-full ${theme.branding.sidebarWidth} flex-col bg-blueberry-900 text-white shadow-xl`}>
             {/* Логотип (строка и ширина — theme.branding) */}
-            <div className="flex h-16 items-center justify-center border-b border-blueberry-600">
+            <div className="flex h-16 shrink-0 items-center justify-center border-b border-blueberry-600">
                 <h1 className="text-2xl font-bold tracking-wider">{theme.branding.logoText}</h1>
             </div>
 
             {/* Информация о пользователе */}
-            <div className="border-b border-blueberry-600 p-4">
+            <div className="shrink-0 border-b border-blueberry-600 p-4">
                 <p className="truncate text-sm font-medium text-blueberry-100">{user?.full_name}</p>
                 <p className="text-xs capitalize text-blueberry-300">{user?.role.replace('_', ' ')}</p>
             </div>
@@ -68,7 +74,7 @@ const Sidebar = () => {
                 ['waiter', 'hookah_master', 'hookah_bar', 'admin', 'director', 'sys_admin'].includes(
                     user.role
                 ) && (
-                    <div className="border-b border-blueberry-600 p-4">
+                    <div className="shrink-0 border-b border-blueberry-600 p-4">
                         <ShiftButton />
                     </div>
                 )}
@@ -81,8 +87,8 @@ const Sidebar = () => {
                         return (
                             <li key={item.path}>
                                 <button
-                                    onClick={() => navigate(item.path)}
-                                    className={`flex w-full items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors ${
+                                    onClick={() => go(item.path)}
+                                    className={`flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-left transition-colors ${
                                         isActive
                                             ? 'bg-blueberry-600 text-white shadow-md'
                                             : 'text-blueberry-100 hover:bg-blueberry-800 hover:text-white'
@@ -98,7 +104,7 @@ const Sidebar = () => {
             </nav>
 
             {/* Подвал сайдбара: кнопка выхода (стили — theme.footer) */}
-            <div className={theme.footer.container}>
+            <div className={`${theme.footer.container} shrink-0`}>
                 <button
                     onClick={handleLogout}
                     className={theme.footer.logoutButton}

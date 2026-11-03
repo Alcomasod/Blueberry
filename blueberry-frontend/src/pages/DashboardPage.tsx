@@ -104,9 +104,9 @@ const DashboardPage = () => {
     return (
         <div className="space-y-6">
             {/* Заголовок */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-800">Дашборд</h1>
+                    <h1 className="text-xl md:text-3xl font-bold text-gray-800">Дашборд</h1>
                     <p className="mt-1 text-gray-600">
                         Добро пожаловать, {user?.full_name}! Здесь публикуются важные оповещения (стоп-листы и т.п.).
                     </p>
