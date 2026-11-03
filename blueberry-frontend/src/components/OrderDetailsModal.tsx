@@ -282,28 +282,12 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
         setShowPayModal(true);
     };
 
-    // Оплата из модалки подтверждения — через основной эндпоинт POST /orders/:id/pay
-    // (начисление баллов, освобождение стола и т.д. на бэкенде).
-    const confirmPaymentFromDetails = async () => {
-        try {
-            await api.post(`/orders/${orderId}/pay`, {
-                payment_method: 'card',
-                tip_amount: 0,
-                discount_amount: 0,
-            });
-            onClose();
-        } catch (err) {
-            // Fallback для старых сборок бэкенда: PATCH статуса (как было раньше)
-            const status = (err as { response?: { status?: number } })?.response?.status;
-            if (status === 404) {
-                try {
-                    await api.patch(`/orders/${orderId}`, { status: 'paid' });
-                    onClose();
-                    return;
-                } catch { /* падаем в общее сообщение об ошибке */ }
-            }
-            alert(getApiErrorMessage(err, 'Ошибка оплаты заказа'));
-        }
+    // Успешная оплата из PaymentModal (модалка уже выполнила POST /orders/:id/pay).
+    // Здесь только закрываем окно — повторный запрос на /pay отправлять НЕЛЬЗЯ,
+    // иначе бэкенд получает двойную оплату (первый 200, второй 500).
+    const handlePaidFromModal = () => {
+        setShowPayModal(false);
+        onClose();
     };
 
     const fetchHistory = async () => {
@@ -710,7 +694,7 @@ export default function OrderDetailsModal({ orderId, isOpen = true, onClose }: O
                     amount={formatAmount(total)}
                     mode="pay"
                     onClose={() => setShowPayModal(false)}
-                    onSuccess={confirmPaymentFromDetails}
+                    onSuccess={handlePaidFromModal}
                 />
             )}
         </Modal>
