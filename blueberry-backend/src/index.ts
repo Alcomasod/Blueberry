@@ -51,20 +51,39 @@ app.use(express.json());
 
 // CORS: список разрешённых источников задаётся через ALLOWED_ORIGINS
 // (через запятую). Если переменная не задана — локальные адреса для разработки.
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+// Дополнительно всегда разрешаются localhost/127.0.0.1 в любом варианте порта.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
 
-app.use(cors({
+const devOrigins = ['http://localhost:5173', 'http://localhost:4173'];
+
+const isAllowedOrigin = (origin: string): boolean => {
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+    return allowedOrigins.includes(origin) || devOrigins.includes(origin);
+};
+
+const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
-        // Разрешаем запросы без Origin (curl, мобильные приложения, server-to-server)
-        if (!origin || allowedOrigins.includes(origin)) {
+        // Запросы без Origin (curl, мобильные приложения, server-to-server,
+        // а также навигационные GET-запросы браузера к статике) — пропускаем.
+        if (!origin || isAllowedOrigin(origin)) {
             return callback(null, true);
         }
         return callback(new Error('Not allowed by CORS'));
     },
-}));
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+// ВАЖНО: CORS применяется ТОЛЬКО к API-роутам (/api/*).
+// Статические файлы фронтенда отдаются без проверки CORS — они приходят
+// с того же домена и не требуют заголовков Access-Control-Allow-Origin.
+// Глобальный app.use(cors(...)) раньше перехватывал и запросы к /assets/,
+// что вызывало «Error: Not allowed by CORS» при загрузке JS/CSS.
+const apiCors = cors(corsOptions);
 
 // Защита от брутфорса: не более 10 попыток входа с одного IP за 15 минут
 const authLimiter = rateLimit({
@@ -79,7 +98,7 @@ const authLimiter = rateLimit({
 // Примечание: корневой маршрут '/' намеренно НЕ объявлен здесь —
 // он регистрируется ниже после branch со статикой фронтенда и отдаёт
 // index.html SPA. Для health-check API используется '/api/health'.
-app.get('/health', async (req: Request, res: Response) => {
+app.get('/health', apiCors, async (req: Request, res: Response) => {
     try {
         const result = await pool.query('SELECT NOW()');
         res.json({
@@ -99,29 +118,30 @@ app.get('/health', async (req: Request, res: Response) => {
 });
 
 // Публичные роуты (с защитой от брутфорса)
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', apiCors, authLimiter, authRoutes);
 
 // ==========================================
 // ЗАЩИЩЕННЫЕ РОУТЫ
 // ==========================================
 
 // Меню: просмотр доступен всем авторизованным
-app.use('/api/menu', authenticateToken, menuRoutes);
+app.use('/api/menu', apiCors, authenticateToken, menuRoutes);
 
 // Управление меню: только admin+ (требуется пермишен MANAGE_MENU)
-app.use('/api/menu-management', authenticateToken, requirePermission(PERMISSIONS.MANAGE_MENU), menuManagementRoutes);
+app.use('/api/menu-management', apiCors, authenticateToken, requirePermission(PERMISSIONS.MANAGE_MENU), menuManagementRoutes);
 
 // Смены
-app.use('/api/shifts', authenticateToken, shiftRoutes);
+app.use('/api/shifts', apiCors, authenticateToken, shiftRoutes);
 
 // Заказы
 const STARTUP_TS = Date.now();
 
 // Диагностика сборки: позволяет проверить, какой версии бэкенда отвечает контейнер.
 // Ожидаемый ответ после пересборки: 200 с build >= 2026-10-28a (close endpoint available: true)
-app.get('/api/_build-info', (_req: Request, res: Response) => {
+app.get('/api/_build-info', apiCors, (_req: Request, res: Response) => {
     res.json({
-        build: '2026-10-29a',
+        build: '2026-11-03a',
+        corsScopedToApi: true,
         patchOrderEndpointAvailable: true,
         closeEndpointAvailable: true,
         payTransactionSafe: true,
@@ -130,43 +150,43 @@ app.get('/api/_build-info', (_req: Request, res: Response) => {
     });
 });
 
-app.use('/api/orders', authenticateToken, orderRoutes);
+app.use('/api/orders', apiCors, authenticateToken, orderRoutes);
 
 // Аналитика: /my-shift и /top-items — всем сотрудникам (защита на уровне роута),
 // остальные эндпоинты — admin+ (requirePermission внутри analyticsRoutes)
-app.use('/api/analytics', authenticateToken, analyticsRoutes);
+app.use('/api/analytics', apiCors, authenticateToken, analyticsRoutes);
 
 // Пользователи: только admin+
-app.use('/api/users', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), userRoutes);
+app.use('/api/users', apiCors, authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), userRoutes);
 
 // Столы и зоны
-app.use('/api/zones', authenticateToken, zoneRoutes);
+app.use('/api/zones', apiCors, authenticateToken, zoneRoutes);
 // Столы: таблица маршрутов (tableRoutes) сама защищает каждую операцию
 // соответствующим пермишеном (MANAGE_TABLE_STATUS / MANAGE_TABLES).
 // Повторное подключение того же роутера без requirePermission создавало
 // лазейку: первый совпавший маршрут выигрывал, и права не проверялись.
-app.use('/api/tables', authenticateToken, tableRoutes);
+app.use('/api/tables', apiCors, authenticateToken, tableRoutes);
 // Кальяны
-app.use('/api/hookah/flavors', authenticateToken, hookahFlavorRoutes);
-app.use('/api/hookah/orders', authenticateToken, hookahOrderRoutes);
+app.use('/api/hookah/flavors', apiCors, authenticateToken, hookahFlavorRoutes);
+app.use('/api/hookah/orders', apiCors, authenticateToken, hookahOrderRoutes);
 
 
 // Постоянники
-app.use('/api/customers', authenticateToken, customerRoutes);
+app.use('/api/customers', apiCors, authenticateToken, customerRoutes);
 
 // Бой посуды
-app.use('/api/incidents', authenticateToken, incidentRoutes);
+app.use('/api/incidents', apiCors, authenticateToken, incidentRoutes);
 
 // Оповещения на дашборде: просмотр — всем авторизованным,
 // создание/отключение — только admin+ (проверяется внутри маршрутов).
 // ВНИМАНИЕ: монтируем роутер и по пути с завершающим слэшем, иначе при
 // strict routing Express (версии 4.x) запросы вида '/api/announcements/'
 // (двойной слэш в baseURL + путь) не матчатся и получают 404.
-app.use('/api/announcements', authenticateToken, announcementRoutes);
-app.use('/api/announcements/', authenticateToken, announcementRoutes);
+app.use('/api/announcements', apiCors, authenticateToken, announcementRoutes);
+app.use('/api/announcements/', apiCors, authenticateToken, announcementRoutes);
 
 // Профиль сотрудника: доступен всем авторизованным (self-service)
-app.use('/api/profile', authenticateToken, profileRoutes);
+app.use('/api/profile', apiCors, authenticateToken, profileRoutes);
 
 // ==========================================
 // СТАТИКА ФРОНТЕНДА (единый контейнер)
@@ -195,7 +215,7 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 // Health-check API (используется Nginx/Docker и мониторингом вместо '/').
-app.get('/api/health', async (req: Request, res: Response) => {
+app.get('/api/health', apiCors, async (req: Request, res: Response) => {
     try {
         const result = await pool.query('SELECT NOW()');
         res.json({ status: 'ok', project: 'Blueberry', database: 'connected', time: result.rows[0].now });
