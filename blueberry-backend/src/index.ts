@@ -76,10 +76,9 @@ const authLimiter = rateLimit({
 });
 
 // Системные роуты
-app.get('/', (req: Request, res: Response) => {
-    res.json({ message: 'Blueberry CRM API is running 🫐' });
-});
-
+// Примечание: корневой маршрут '/' намеренно НЕ объявлен здесь —
+// он регистрируется ниже после branch со статикой фронтенда и отдаёт
+// index.html SPA. Для health-check API используется '/api/health'.
 app.get('/health', async (req: Request, res: Response) => {
     try {
         const result = await pool.query('SELECT NOW()');
@@ -195,15 +194,35 @@ app.get('/', (req: Request, res: Response) => {
     res.json({ message: 'Blueberry CRM API is running 🫐' });
 });
 
+// Health-check API (используется Nginx/Docker и мониторингом вместо '/').
+app.get('/api/health', async (req: Request, res: Response) => {
+    try {
+        const result = await pool.query('SELECT NOW()');
+        res.json({ status: 'ok', project: 'Blueberry', database: 'connected', time: result.rows[0].now });
+    } catch (error) {
+        res.status(500).json({ status: 'error', project: 'Blueberry', database: 'disconnected', error: (error as Error).message });
+    }
+});
+
 // 404 для неизвестных api-путей
 // app.use('/api', notFoundHandler);
 
-// SPA-fallback: все прочие GET-запросы отдаём index.html,
+// SPA-fallback: все прочие GET-запросы (кроме /api/*) отдаём index.html,
 // чтобы React Router корректно обрабатывал прямые ссылки (/tables, /orders/5).
+// express.static выше уже отдал реальные файлы (js/css/картинки), поэтому
+// сюда доходят только маршруты приложения.
 if (hasFrontend) {
     app.get('*', (req: Request, res: Response) => {
+        // /api/* не должен попадать под SPA-fallback — отдаём честный 404 JSON,
+        // иначе фронту приходит HTML и ошибки сети выглядят некорректно.
+        if (req.path.startsWith('/api')) {
+            return notFoundHandler(req, res);
+        }
         res.sendFile(frontendIndex);
     });
+} else {
+    // Если фронтенд не собран — неизвестные не-API пути должны получать JSON 404.
+    app.use(notFoundHandler);
 }
 
 // Централизованная обработка ошибок (всегда последней)
